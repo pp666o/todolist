@@ -3,4 +3,5 @@ uvicorn
 sqlalchemy
 psycopg2-binary
 pgvector
-python-dotenv
+sentence-transformers
+requests

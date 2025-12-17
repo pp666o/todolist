@@ -33,22 +33,22 @@ class VectorEngine:
         print(">>> [Sync] 开始从数据库加载数据到内存...")
         start_time = time.time()
         
-        # 1. 查询所有 Todo
+        #1. 查询所有 Todo
         todos = db.query(Todo).all()
         
         count = 0
         for t in todos:
-            # 数据转换：
-            # Python datetime -> Unix Timestamp (long long)
-            # PGVector -> List[float]
+            #data transfer format:
+            #Python datetime -> Unix Timestamp (long long)
+            #PGVector -> List[float]
             
             if not t.start_time:
                 continue # 如果没有时间，无法进行时间范围匹配，跳过
                 
             ts = int(t.start_time.timestamp())
             
-            # 处理向量转换 (pgvector 在 python 中通常表现为 list 或 numpy array)
-            # 这里的 .tolist() 是为了保险，确保传给 C++ 是一组纯浮点数
+            #处理向量转换 (pgvector 在 python 中为 list 或 numpy array)
+            #这里的 .tolist() 是为了保险，确保传给 C++ 是一组纯浮点数
             vec_data = t.embedding
             if hasattr(vec_data, 'tolist'):
                 vec_data = vec_data.tolist()
@@ -74,5 +74,5 @@ class VectorEngine:
         """暴露给 API 的搜索接口"""
         return self._engine.search(start_ts, end_ts, query_vec, top_k)
 
-# 全局单例对象
+#global singleton instance
 global_engine = VectorEngine()

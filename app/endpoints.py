@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from . import models, schemas, database, utils
 from .services.engine_service import global_engine
+from .services.ml_engine import global_model
 
 router = APIRouter()
 
@@ -43,7 +44,7 @@ def search_todos(request: schemas.SearchRequest):
     #D. format response
     response_list = []
     for tid, score, content in results:
-        #这里可以直接用 C++ 返回的 content，也可以去 DB 查详情
+        #这里可以直接用 C++ 返回的 content，也可以去 DB查详情
         #为演示速度，直接构造返回
         response_list.append(schemas.TodoResponse(
             id=tid,
@@ -53,3 +54,37 @@ def search_todos(request: schemas.SearchRequest):
         ))
         
     return response_list
+
+@router.post("/train/{user_id}")
+def train_model(user_id: int, db: Session = Depends(database.get_db)):
+    """
+    触发机器学习训练。
+    在真实系统中，这通常由后台定时任务(Cron Job)每天凌晨触发。
+    """
+    try:
+        status = global_model.train(db, user_id)
+        if status == "No Data":
+            return {"status": "warning", "message": "数据不足，请先运行 mock_history.py 生成数据"}
+        return {
+            "status": "success", 
+            "message": "模型训练完成", 
+            "learned_clusters": global_model.cluster_map
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.post("/predict/")
+def predict_next(request: schemas.TodoCreate, db: Session = Depends(database.get_db)):
+    """
+    预测接口：告诉系统你刚完成了什么，系统猜你下一步做什么。
+    """
+    #1.Let user input content, get embedding
+    vector = utils.get_embedding(request.content)
+    
+    #2.input to ML model for prediction
+    recommendation = global_model.predict(vector)
+    
+    if recommendation:
+        return {"result": recommendation}
+    else:
+        return {"result": "暂无高置信度推荐，随便做点什么吧！"}

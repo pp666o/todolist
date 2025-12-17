@@ -15,7 +15,7 @@ async def lifespan(app: FastAPI):
     # --- 启动时执行 ---
     print("\n🚀 系统启动中...")
     
-    #获取一个temp的数据库会话
+    #获取一个temporary数据库会话
     db = database.SessionLocal()
     try:
         #调用 Service 层的加载逻辑
@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
     
     yield #应用运行的时间
     
-    # --- 关闭时执行 (可选) ---
+    # --- 关闭时执行 ---
     print("🛑 系统关闭。\n")
 
 app = FastAPI(lifespan=lifespan)

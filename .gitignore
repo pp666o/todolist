@@ -1,4 +1,4 @@
-# --- Python 垃圾文件 ---
+#--- Python 垃圾文件 ---
 __pycache__/
 *.py[cod]
 *$py.class
@@ -6,22 +6,19 @@ __pycache__/
 venv/
 env/
 
-# --- C++ 编译产物 (对应你 VSCode 截图里的内容) ---
-# 忽略 cpp_core 下的 build 文件夹
+
+#忽略 cpp_core 下的 build 文件夹
 cpp_core/build/
-# 忽略编译出来的 .so 文件 (那个 todo_core.cpython...so)
+#忽略编译出来的 .so 文件 和其他中间文件
 *.so
 *.o
 *.dylib
 
-# --- Mac 系统文件 ---
+#--- Mac 系统文件 ---
 .DS_Store
 
-# --- 外部依赖库 ---
-# 你截图里有一个 pgvector 文件夹，这是外部源码，
-# 通常不需要传到你的私有代码库里（除非你想魔改它）
+#--- 外部依赖库 ---
 pgvector/
 
 # --- 安全 ---
-# 绝对不要上传 .env
 .env
