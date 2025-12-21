@@ -22,3 +22,7 @@ class TodoResponse(BaseModel):
     score: Optional[float] = None  #serach score
     class Config:
         from_attributes = True
+#predict request data
+class PredictRequest(BaseModel):
+    content: str
+    start_time: str | None = None

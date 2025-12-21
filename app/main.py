@@ -1,35 +1,42 @@
-from fastapi import FastAPI, Depends
-from sqlalchemy.orm import Session
+from fastapi import FastAPI
 from contextlib import asynccontextmanager
+from .database import engine, Base, SessionLocal
+from .endpoints import router
+from .services.redis_service import redis_manager #redis service
+from .services.engine_service import global_engine 
 
-from . import models, database
-from .services.engine_service import global_engine
-from . import endpoints
+#创建数据库表
+Base.metadata.create_all(bind=engine)
 
-#1.Auto create DB tables
-models.Base.metadata.create_all(bind=database.engine)
-
-#2. Lifespan - FastAPI 应用生命周期管理
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # --- 启动时执行 ---
     print("\n🚀 系统启动中...")
     
-    #获取一个temporary数据库会话
-    db = database.SessionLocal()
+    # A.连接 Redis
+    await redis_manager.connect()
+    
+    # B.加载 C++ 检索引擎
+    db = SessionLocal()
     try:
-        #调用 Service 层的加载逻辑
+        print(">>> [Core] 正在从数据库重载向量索引...")
         global_engine.reload_from_db(db)
+    except Exception as e:
+        print(f"⚠️ 索引加载警告: {e}")
     finally:
         db.close()
     
-    yield #应用运行的时间
+    yield # 应用运行中...
     
-    # --- 关闭时执行 ---
-    print("🛑 系统关闭。\n")
+    # --- 🛑 关闭时执行 ---
+    print("🛑 系统关闭中...")
+    
+    # C. 断开 Redis 连接
+    await redis_manager.close()
+    print("👋 Redis 连接已断开")
 
 app = FastAPI(lifespan=lifespan)
-app.include_router(endpoints.router) #register API routes
+app.include_router(router)
 
 @app.get("/")
 def root():

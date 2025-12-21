@@ -1,78 +1,87 @@
 import sys
 import os
 import time
-from sqlalchemy.orm import Session
-from app.models import Todo
+from app import models
 
+#path os manipulation to import C++ module
 current_dir = os.path.dirname(os.path.abspath(__file__))
 cpp_core_path = os.path.join(current_dir, "../../cpp_core")
-sys.path.append(cpp_core_path)
+if cpp_core_path not in sys.path:
+    sys.path.append(cpp_core_path)
 
+#import C++ todo_core module
 try:
-    import todo_core
+    import todo_core # type: ignore
 except ImportError:
-    print("❌ 严重错误: 无法导入 C++ 模块 'todo_core'。请确保已在 cpp_core 目录下运行编译命令。")
-    sys.exit(1)
+    todo_core = None
 
+#engine service class
 class VectorEngine:
-    _instance = None
-    _engine = None
+    def __init__(self):
+        self.core = None
+        if todo_core:
+            try:
+                # fix 1: Class name must be TodoEngine (TO -> matcher.cpp)
+                self.core = todo_core.TodoEngine()
+                print(">>> [C++ Engine] Core initialized successfully (TodoEngine).")
+            except Exception as e:
+                print(f"❌ [C++ Engine] 初始化失败: {e}")
+                print(f"    模块内容: {dir(todo_core)}") #debug
+        else:
+            print("⚠️ [C++ Engine] 模块未导入，运行在降级模式")
 
-    def __new__(cls):
-        """单例模式：确保全局只有一个 C++ 引擎实例"""
-        if cls._instance is None:
-            cls._instance = super(VectorEngine, cls).__new__(cls)
-            print(">>> [System] 初始化 C++ 检索引擎...")
-            cls._engine = todo_core.TodoEngine()
-        return cls._instance
-
-    def reload_from_db(self, db: Session):
-        """
-        核心逻辑：从 Postgres 读取所有数据，格式化后灌入 C++
-        """
-        print(">>> [Sync] 开始从数据库加载数据到内存...")
-        start_time = time.time()
-        
-        #1. 查询所有 Todo
-        todos = db.query(Todo).all()
-        
-        count = 0
-        for t in todos:
-            #data transfer format:
-            #Python datetime -> Unix Timestamp (long long)
-            #PGVector -> List[float]
-            
-            if not t.start_time:
-                continue # 如果没有时间，无法进行时间范围匹配，跳过
-                
-            ts = int(t.start_time.timestamp())
-            
-            #处理向量转换 (pgvector 在 python 中为 list 或 numpy array)
-            #这里的 .tolist() 是为了保险，确保传给 C++ 是一组纯浮点数
-            vec_data = t.embedding
-            if hasattr(vec_data, 'tolist'):
-                vec_data = vec_data.tolist()
-            
-            self._engine.add_todo(t.id, ts, t.content, vec_data)
-            count += 1
-            
-        duration = time.time() - start_time
-        print(f">>> [Sync] 加载完成！共 {count} 条数据，耗时 {duration:.4f}秒。")
-        print(f">>> [Engine] 当前引擎内数据量: {self._engine.size()}")
-
-    def add_single_todo(self, todo: Todo):
-        """当用户创建新 Todo 时调用，增量更新 C++"""
-        if not todo.start_time:
+    def reload_from_db(self, db_session):
+        """从数据库全量加载数据"""
+        if not self.core:
             return
-        ts = int(todo.start_time.timestamp())
-        vec = todo.embedding
-        if hasattr(vec, 'tolist'):
-            vec = vec.tolist()
-        self._engine.add_todo(todo.id, ts, todo.content, vec)
+            
+        try:
+            todos = db_session.query(models.Todo).all()
+            count = 0
+            for todo in todos:
+                if todo.embedding is not None and todo.created_at is not None:
+                    # fix 2: change time stamps (C++ endd long long)
+                    ts = int(todo.created_at.timestamp())
+                    
+                    # fix 3: put 4 parameters
+                    self.core.add_todo(todo.id, ts, todo.content, todo.embedding)
+                    count += 1
+            print(f">>> [C++ Engine] Reloaded {count} items.")
+        except Exception as e:
+            print(f"❌ [C++ Engine] 重载数据失败: {e}")
 
-    def search(self, start_ts, end_ts, query_vec, top_k=5):
-        """暴露给 API 的搜索接口"""
-        return self._engine.search(start_ts, end_ts, query_vec, top_k)
+    def search(self, start_ts: int, end_ts: int, query_vector: list, top_k: int = 5):
+        """
+        调用 C++ 进行检索 (支持时间范围)
+        """
+        if not self.core:
+            return []
+        
+        try:
+            # get C++: search(start_ts, end_ts, vector, topk)
+            # Notice强调！：直接透传 endpoint 传过来的 start_ts 和 end_ts
+            return self.core.search(start_ts, end_ts, query_vector, top_k)
+        except Exception as e:
+            print(f"❌ [C++ Engine] 搜索失败: {e}")
+            return []
 
-#global singleton instance
+    def add_todo(self, todo_id: int, content: str, created_at, vector: list):
+        """
+        实时添加任务
+        注意：参数变多了，因为 C++ 引擎现在更强大了，需要存内容和时间
+        """
+        if not self.core:
+            return
+
+        if vector is not None:
+            try:
+                #set timestamp
+                ts = int(created_at.timestamp()) if created_at else int(time.time())
+                
+                #get C++ API right
+                self.core.add_todo(todo_id, ts, content, vector)
+                print(f">>> [C++ Engine] Added item {todo_id} to memory.")
+            except Exception as e:
+                print(f"❌ [C++ Engine] 添加任务失败: {e}")
+
 global_engine = VectorEngine()

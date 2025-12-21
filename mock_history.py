@@ -33,7 +33,7 @@ def generate_mock_data():
         daily_chains = [chain_work, chain_health, chain_fun]
         selected_chain = random.choice(daily_chains)
         
-        # 偶尔混入一些跨链条的任务，增加多样性
+        #偶尔混入一些跨链条的任务，增加多样性
         if random.random() > 0.7:
              selected_chain = chain_work + chain_health
         
@@ -53,7 +53,7 @@ def generate_mock_data():
             db.commit()
             db.refresh(todo)
             
-            # 2.record Interaction (complete)
+            #2.record Interaction (complete)
             interact_time = task_time + datetime.timedelta(minutes=30)
             
             interaction = models.Interaction(

@@ -5,3 +5,7 @@ psycopg2-binary
 pgvector
 sentence-transformers
 requests
+scikit-learn
+pandas
+numpy
+redis
