@@ -2,19 +2,21 @@ from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from .database import engine, Base, SessionLocal
 from .endpoints import router
-from .services.redis_service import redis_manager #redis service
-from .services.engine_service import global_engine 
+from .services.redis_service import redis_client #redis service
+from .services.engine_service import global_engine
+from . import endpoints
 
 #创建数据库表
 Base.metadata.create_all(bind=engine)
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # --- 启动时执行 ---
+    # ---lunaching processing---
     print("\n🚀 系统启动中...")
     
     # A.连接 Redis
-    await redis_manager.connect()
+    await redis_client.connect()
     
     # B.加载 C++ 检索引擎
     db = SessionLocal()
@@ -26,17 +28,18 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
     
-    yield # 应用运行中...
+    yield # 应用运行
     
     # --- 🛑 关闭时执行 ---
     print("🛑 系统关闭中...")
     
     # C. 断开 Redis 连接
-    await redis_manager.close()
+    await redis_client.close()
     print("👋 Redis 连接已断开")
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(router)
+app.include_router(endpoints.router, prefix="/mab", tags=["MAB Backend"])
 
 @app.get("/")
 def root():

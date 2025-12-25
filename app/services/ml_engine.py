@@ -6,6 +6,7 @@ from app import models
 import os
 import pickle
 from collections import defaultdict
+import jieba
 
 class BehaviorModel:
     def __init__(self):
@@ -109,22 +110,50 @@ class BehaviorModel:
     
 class MLEngine:
     def __init__(self):
-        # 1. 强制使用绝对路径 (防止相对路径带来的混乱)
+        # 1. 强制使用绝对路径
         current_dir = os.path.dirname(os.path.abspath(__file__))
         self.model_path = os.path.join(current_dir, "todo_model.pkl")
         
         print(f"\n🔍 [ML Init] 模型文件路径设定为: {self.model_path}")
         
-        self.markov_chain = defaultdict(lambda: defaultdict(int))
+        self.personal_chain = defaultdict(lambda: defaultdict(int))
         self.is_trained = False
         
         #init: 尝试加载已有模型
         self.load_model()
-
-    def train(self, tasks_data):
-        """训练模型"""
-        print(f"💪 [ML Train] 开始训练，收到 {len(tasks_data)} 条数据")
         
+    def predict(self, current_content, global_transitions=None, hot_list=None):
+        """
+        三级预测模型
+        :param current_content: 用户当前做的任务
+        :param global_transitions: 全局共现矩阵 (协同层)
+        :param hot_list: 全网热榜 (探出层)
+        """
+        keyword = self._extract_keyword(current_content)
+        
+        # --- 第1层：个人习惯 (Personal Markov) ---
+        candidates = self.personal_chain.get(keyword)
+        if candidates:
+            best_next = max(candidates, key=candidates.get)
+            return f"🎯 [个人习惯] 根据你的历史，建议: {best_next}"
+        
+        # --- 第2层：全局协同 (Global/Collaborative) ---
+        if global_transitions and keyword in global_transitions:
+            suggestion = global_transitions[keyword]
+            return f"👥 [大家都在做] 很多人做完这个会去: {suggestion}"
+        
+        # --- 第3层：探出/热度层 (Exploration/Hot) ---
+        if hot_list and len(hot_list) > 0:
+            top_one = hot_list[0]['content']
+            return f"🔥 [全网热搜] 不知道做什么？试试这个: {top_one}"
+
+        return "💡 [冷启动] 还没想好？去探索点新任务吧！"
+
+    # =========================================
+    # training and studing methods
+    # =========================================
+    def train(self, tasks_data):
+        """训练模型 (构建马尔可夫链)"""
         if not tasks_data:
             return "数据为空，无法训练"
 
@@ -134,104 +163,78 @@ class MLEngine:
             sorted_tasks = tasks_data
         
         count = 0
-        self.markov_chain.clear() 
+        self.personal_chain.clear() 
         
         for i in range(len(sorted_tasks) - 1):
             curr = self._extract_keyword(sorted_tasks[i]['content'])
             next_t = self._extract_keyword(sorted_tasks[i+1]['content'])
             
             if curr and next_t:
-                self.markov_chain[curr][next_t] += 1
+                self.personal_chain[curr][next_t] += 1
                 count += 1
 
         self.is_trained = True
-        print(f"✅ [ML Train] 内存训练完成，生成了 {count} 个关联规则")
         self.save_model()
         return f"训练成功！学习了 {count} 组行为关联。"
 
-    def predict(self, current_content):
-        """预测下一步"""
-        print(f"🤔 [ML Predict] 收到请求: '{current_content}'")
-        print(f"    当前状态: is_trained={self.is_trained}")
-
-        #fix point: try load if not trained
-        if not self.is_trained:
-            print("    状态为未训练，尝试从硬盘紧急加载...")
-            self.load_model()
-            print(f"    重载后状态: is_trained={self.is_trained}")
+    # =========================================
+    # 工具函数 分词与提取
+    # =========================================
+    def extract_tags(self, content):
+        """Jieba 分词提取标签"""
+        if not content:
+            return []
+        content = str(content)
+        clean_content = content
+        if "]" in content:
+            clean_content = content.split("]")[-1].strip()
             
-        if not self.is_trained:
-            print("❌ [ML Predict] 最终放弃：模型确实未训练")
-            return "模型未训练 (即使尝试加载文件也失败了，请检查后端日志)"
-            
-        keyword = self._extract_keyword(current_content)
-        print(f"    提取关键词: '{keyword}'")
+        words = jieba.lcut(clean_content)
+        tags = [w for w in words if len(w) > 1] # 过滤单字
         
-        next_candidates = self.markov_chain.get(keyword)
-        
-        if not next_candidates:
-            #Match similar keys
-            for k in self.markov_chain:
-                if k in keyword or keyword in k:
-                    next_candidates = self.markov_chain[k]
-                    print(f"    模糊匹配成功: '{k}' -> {dict(next_candidates)}")
-                    break
-            
-            if not next_candidates:
-                print(f"    没有找到关于 '{keyword}' 的后续动作")
-                return f"暂无关于'{keyword}'的习惯，去探索新事物吧！"
-            
-        best_next = max(next_candidates, key=next_candidates.get)
-        print(f"🎯 [ML Predict] 预测结果: {best_next}")
-        return f"根据习惯，你可能想去: {best_next}"
+        if not tags and clean_content:
+            return [clean_content]
+        return tags
 
     def _extract_keyword(self, content):
-        if not content: return ""
-        content = str(content)
-        if "]" in content:
-            return content.split("]")[-1].strip()
-        return content.strip()
+        """内部使用的关键词提取"""
+        tags = self.extract_tags(content)
+        return tags[0] if tags else str(content).strip()
 
+    # =========================================
+    # 持久化 (Save/Load)
+    # =========================================
     def save_model(self):
         """保存模型到硬盘"""
         try:
-            print(f"💾 [ML Save] 正在保存到: {self.model_path}")
             with open(self.model_path, 'wb') as f:
-                plain_dict = {k: dict(v) for k, v in self.markov_chain.items()}
+                # defaultdict 不能直接 pickle，转成普通 dict
+                plain_dict = {k: dict(v) for k, v in self.personal_chain.items()}
                 pickle.dump(plain_dict, f)
-            print("✅ [ML Save] 保存成功！")
+            print(f">>> [ML] 模型保存成功: {self.model_path}")
         except Exception as e:
-            print(f"❌ [ML Save] 保存失败！！！错误: {e}")
+            print(f"❌ [ML] 保存失败: {e}")
 
     def load_model(self):
         """从硬盘加载模型"""
-        print(f"📂 [ML Load] 正在检查文件: {self.model_path}")
-        
         if os.path.exists(self.model_path):
-            print("    文件存在 ✅")
             try:
                 with open(self.model_path, 'rb') as f:
                     data = pickle.load(f)
-                    
-                    #check out data validity
-                    if not data:
-                        print("    ⚠️ 警告：文件里的数据是空的！")
-                    else:
-                        print(f"    读取到数据: 包含 {len(data)} 个主关键词")
-                        
-                    self.markov_chain.clear()
+                    self.personal_chain.clear()
+                    # 恢复 defaultdict 结构
                     for k, v in data.items():
                         for next_k, count in v.items():
-                            self.markov_chain[k][next_k] = count
-                            
+                            self.personal_chain[k][next_k] = count
                     self.is_trained = True
-                    print("✅ [ML Load] 加载成功，引擎已就绪")
+                    print(">>> [ML] 历史模型加载成功")
             except Exception as e:
-                print(f"❌ [ML Load] 文件读取报错: {e}")
+                print(f"⚠️ [ML] 加载失败: {e}")
                 self.is_trained = False
         else:
-            print("❌ [ML Load] 文件不存在 ❌ (需要先点击训练)")
+            print(">>> [ML] 无历史模型，等待训练...")
             self.is_trained = False
-            
-predictor = MLEngine()          
+
+# 实例化
+predictor = MLEngine()
 global_model = BehaviorModel()

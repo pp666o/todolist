@@ -10,7 +10,7 @@ class TodoClientApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Todo AI Pro - 智能生活助手")
-        self.root.geometry("1000x800")
+        self.root.geometry("1100x850") 
 
         # 全局样式
         style = ttk.Style()
@@ -20,9 +20,13 @@ class TodoClientApp:
         # === 核心状态 ===
         self.current_user_id = tk.StringVar(value="1") # 默认用户 ID 1
         self.current_location = tk.StringVar(value="🏠 家里") # 默认位置
+        
+        self.market_data_map = {}
+        self.ad_payload_map = {}   # 广告数据
 
-        # === 布局：顶部栏 (用户 + 状态) ===
+        # === 布局：顶部栏 (用户 + 状ß态) ===
         self.setup_top_bar()
+        ttk.Button(self.top_frame, text="👮 审核后台", command=self.open_admin_panel).pack(side=tk.RIGHT, padx=5)
 
         # === 布局：主区域 (左右分栏) ===
         # PanedWindow 允许用户拖动中间的分隔线
@@ -37,27 +41,27 @@ class TodoClientApp:
         self.right_panel = ttk.Frame(self.paned_window)
         self.paned_window.add(self.right_panel, weight=1)
 
-        # === 初始化各个模块 ===
+        # === initialize sub-panels ===
         self.setup_left_panel()
         self.setup_right_panel()
         self.load_history_tasks()
 
     def setup_top_bar(self):
         """顶部栏：用户切换 & 状态显示"""
-        top_frame = ttk.Frame(self.root, padding=10)
-        top_frame.pack(fill=tk.X)
+        self.top_frame = ttk.Frame(self.root, padding=10)
+        self.top_frame.pack(fill=tk.X)
 
-        ttk.Label(top_frame, text="👤 当前用户 ID:").pack(side=tk.LEFT)
-        self.entry_user = ttk.Entry(top_frame, textvariable=self.current_user_id, width=5)
+        ttk.Label(self.top_frame, text="👤 当前用户 ID:").pack(side=tk.LEFT)
+        self.entry_user = ttk.Entry(self.top_frame, textvariable=self.current_user_id, width=5)
         self.entry_user.pack(side=tk.LEFT, padx=5)
 
-        ttk.Label(top_frame, text="📍 当前位置:").pack(side=tk.LEFT, padx=(20, 0))
+        ttk.Label(self.top_frame, text="📍 当前位置:").pack(side=tk.LEFT, padx=(20, 0))
         # 虚拟地理位置选择
-        loc_combo = ttk.Combobox(top_frame, textvariable=self.current_location, width=10, state="readonly")
+        loc_combo = ttk.Combobox(self.top_frame, textvariable=self.current_location, width=10, state="readonly")
         loc_combo['values'] = ("🏠 家里", "🏢 办公室", "💪 健身房", "☕ 咖啡厅", "🚇 地铁上")
         loc_combo.pack(side=tk.LEFT, padx=5)
 
-        ttk.Button(top_frame, text="刷新系统状态", command=self.refresh_status).pack(side=tk.RIGHT)
+        ttk.Button(self.top_frame, text="刷新系统状态", command=self.refresh_status).pack(side=tk.RIGHT)
 
     def setup_left_panel(self):
         """左侧：任务管理核心"""
@@ -95,54 +99,260 @@ class TodoClientApp:
         self.todo_tree.column("Time", width=120)
 
         self.todo_tree.pack(fill=tk.BOTH, expand=True)
+        self.todo_tree.tag_configure('ad', foreground='blue', background='#e3f2fd') #AD styleß
         
-        # 绑定双击事件 (模拟完成互动)
+        # 绑定双击事件 (模拟互动)
         self.todo_tree.bind("<Double-1>", self.on_complete_task)
         
         ttk.Label(frame_list, text="提示: 双击任务可标记为完成 (触发交互学习)").pack(side=tk.BOTTOM, anchor="w")
 
     def setup_right_panel(self):
-        """右侧：AI 智能体"""
-        # 1. 预测模块 (Target 2)
-        frame_predict = ttk.LabelFrame(self.right_panel, text="🔮 AI 预测 (下一步做什么?)", padding=10)
+       # 1. MAB 资产看板
+        frame_asset = ttk.LabelFrame(self.right_panel, text="💰 MAB 资产 (Target 4)", padding=10)
+        frame_asset.pack(fill=tk.X, pady=5)
+
+        self.lbl_balance = ttk.Label(frame_asset, text="余额: 查询中...", font=("Arial", 12, "bold"), foreground="green")
+        self.lbl_balance.pack(side=tk.LEFT)
+
+        ttk.Button(frame_asset, text="⛏️ 挖矿 (+100)", command=self.mine_mab).pack(side=tk.RIGHT)
+        ttk.Button(frame_asset, text="🔄 刷新", command=self.refresh_balance).pack(side=tk.RIGHT, padx=5)
+
+        # 2. 竞价发布区
+        frame_bid = ttk.LabelFrame(self.right_panel, text="📢 发布合拍 (RTB竞价)", padding=10)
+        frame_bid.pack(fill=tk.X, pady=5)
+
+        ttk.Label(frame_bid, text="内容:").pack(side=tk.LEFT)
+        self.entry_bid_content = ttk.Entry(frame_bid, width=12)
+        self.entry_bid_content.pack(side=tk.LEFT, padx=5)
+
+        ttk.Label(frame_bid, text="出价:").pack(side=tk.LEFT)
+        self.entry_bid_price = ttk.Entry(frame_bid, width=5)
+        self.entry_bid_price.pack(side=tk.LEFT, padx=5)
+        self.entry_bid_price.insert(0, "50")
+
+        ttk.Button(frame_bid, text="🚀 上架", command=self.submit_bid).pack(side=tk.LEFT, padx=5)
+
+        # 3. 交易大厅 (撮合区)
+        frame_market = ttk.LabelFrame(self.right_panel, text="📊 实时合拍市场 (Target 4)", padding=10)
+        frame_market.pack(fill=tk.BOTH, expand=True, pady=5)
+
+        btn_bar = ttk.Frame(frame_market)
+        btn_bar.pack(fill=tk.X, pady=2)
+        ttk.Button(btn_bar, text="🔄 刷新市场", command=self.refresh_market).pack(side=tk.LEFT)
+        #合拍按钮
+        ttk.Button(btn_bar, text="🤝 立即合拍 (赚MAB)", command=self.accept_order).pack(side=tk.RIGHT)
+
+        self.market_list = ttk.Treeview(frame_market, columns=("Bid", "User", "Content"), show="headings", height=6)
+        self.market_list.heading("Bid", text="赏金")
+        self.market_list.heading("User", text="金主")
+        self.market_list.heading("Content", text="内容")
+        self.market_list.column("Bid", width=50, anchor="center")
+        self.market_list.column("User", width=50, anchor="center")
+        self.market_list.column("Content", width=120)
+        self.market_list.pack(fill=tk.BOTH, expand=True)
+
+        # 4. 预测模块 (节省空间)
+        frame_predict = ttk.LabelFrame(self.right_panel, text="🔮 AI 预测", padding=5)
         frame_predict.pack(fill=tk.X, pady=5)
 
-        self.lbl_prediction = ttk.Label(frame_predict, text="等待行为触发...", font=("Arial", 10, "italic"), foreground="gray")
-        self.lbl_prediction.pack(pady=10)
-        btn_frame = ttk.Frame(frame_predict)
-        btn_frame.pack(fill=tk.X)
-        
-        ttk.Button(btn_frame, text="⚙️ 训练模型", command=self.train_ai, width=10).pack(side=tk.LEFT, padx=2)
-        ttk.Button(btn_frame, text="🧠 预测下一步", command=self.predict_next, width=15).pack(side=tk.LEFT, padx=2)
+        self.lbl_prediction = ttk.Label(frame_predict, text="等待预测...", font=("Arial", 10, "italic"), foreground="gray")
+        self.lbl_prediction.pack(side=tk.LEFT, padx=5)
+        ttk.Button(frame_predict, text="🧠 预测下一步", command=self.predict_next).pack(side=tk.RIGHT)
 
-        ttk.Button(frame_predict, text="🧠 基于上一件事猜测", command=self.predict_next).pack(fill=tk.X)
-
-        # 2. 探索模块 (Target 3)
-        frame_trend = ttk.LabelFrame(self.right_panel, text="🔥 全网热榜 (Redis 驱动)", padding=10)
+        # 5. 全网热榜 (Redis)
+        frame_trend = ttk.LabelFrame(self.right_panel, text="🔥 全网热榜", padding=5)
         frame_trend.pack(fill=tk.X, pady=5)
-
-        self.trend_list = tk.Listbox(frame_trend, height=5)
-        self.trend_list.pack(fill=tk.X, pady=5)
         
+        self.trend_list = tk.Listbox(frame_trend, height=4)
+        self.trend_list.pack(fill=tk.X)
         ttk.Button(frame_trend, text="🔄 刷新热度", command=self.refresh_trending).pack(fill=tk.X)
 
-        # 3. 搜索模块 (Target 1)
-        frame_search = ttk.LabelFrame(self.right_panel, text="🔍 语义记忆检索", padding=10)
-        frame_search.pack(fill=tk.BOTH, expand=True, pady=5)
-
-        self.entry_query = ttk.Entry(frame_search)
-        self.entry_query.pack(fill=tk.X, pady=5)
-        self.entry_query.insert(0, "找一下之前玩游戏的记录")
-
-        ttk.Button(frame_search, text="搜索", command=self.search_todos).pack(fill=tk.X)
+        # 初始化加载 Target 4 数据
+        self.refresh_balance()
+        self.refresh_market()
+        self.refresh_trending()
+    def open_admin_panel(self):
+        """打开管理员审核窗口"""
+        win = tk.Toplevel(self.root)
+        win.title("管理员审核后台 (Target 5)")
+        win.geometry("600x400")
         
-        self.search_tree = ttk.Treeview(frame_search, columns=("Score", "Content"), show="headings", height=5)
-        self.search_tree.heading("Score", text="相似度")
-        self.search_tree.heading("Content", text="内容")
-        self.search_tree.column("Score", width=60)
-        self.search_tree.pack(fill=tk.BOTH, expand=True, pady=5)
+        lbl = ttk.Label(win, text="待审核广告队列", font=("Arial", 12, "bold"))
+        lbl.pack(pady=10)
+        
+        # listview
+        columns = ("content", "bid", "user", "raw")
+        tree = ttk.Treeview(win, columns=columns, show="headings")
+        tree.heading("content", text="内容")
+        tree.heading("bid", text="出价")
+        tree.heading("user", text="用户")
+        tree.column("content", width=200)
+        tree.column("bid", width=50)
+        tree.column("user", width=50)
+        # 隐藏 raw 列
+        tree.column("raw", width=0, stretch=False)
+        
+        tree.pack(fill=tk.BOTH, expand=True, padx=10)
+        
+        def load_data():
+            for i in tree.get_children(): tree.delete(i)
+            try:
+                # 调用在后端写的 /admin/pending/ api
+                res = requests.get(f"{API_URL}/admin/pending/")
+                items = res.json().get("pending", [])
+                for item in items:
+                    # make raw payload string 用于提交
+                    raw = json.dumps(item)
+                    tree.insert("", "end", values=(item['content'], item['bid'], item['sponsor'], raw))
+            except Exception as e:
+                print(f"加载审核列表失败: {e}")
 
+        def audit(action):
+            sel = tree.selection()
+            if not sel: return
+            raw = tree.item(sel[0], "values")[3] # 取出隐藏的 raw 数据
+            
+            try:
+                # get/post audit API
+                requests.post(f"{API_URL}/admin/audit/", json={"raw_payload": raw, "action": action})
+                load_data() # refresh
+                messagebox.showinfo("操作成功", f"已{action}")
+            except Exception as e:
+                messagebox.showerror("错误", str(e))
+
+        # 按钮区
+        btn_frame = ttk.Frame(win, padding=10)
+        btn_frame.pack(fill=tk.X)
+        ttk.Button(btn_frame, text="✅ 批准上架", command=lambda: audit("approve")).pack(side=tk.LEFT, padx=10)
+        ttk.Button(btn_frame, text="❌ 拒绝驳回", command=lambda: audit("reject")).pack(side=tk.LEFT)
+        ttk.Button(btn_frame, text="🔄 刷新", command=load_data).pack(side=tk.RIGHT)
+        
+        load_data()
     # === logical function ===
+    def refresh_balance(self):
+        """刷新余额 (增加错误显示)"""
+        user_id = self.current_user_id.get()
+        try:
+            res = requests.get(f"{API_URL}/mab/balance/{user_id}")
+            
+            if res.status_code == 200:
+                # 成功情况
+                bal = res.json().get("balance", 0)
+                self.lbl_balance.config(text=f"余额: {bal} MAB", foreground="green")
+            else:
+                # new：如果接口报错 (比如 404 或 500)，直接显示在界面上
+                self.lbl_balance.config(text=f"余额: 异常 ({res.status_code})", foreground="red")
+                
+        except Exception as e:
+            # 网络连不上
+            self.lbl_balance.config(text="余额: 连接断开", foreground="red")
+            print(f"Debug: {e}")
+
+    def mine_mab(self):
+        """挖矿"""
+        user_id = self.current_user_id.get()
+        try:
+            requests.post(f"{API_URL}/mab/faucet/", json={"user_id": user_id, "amount": 100})
+            self.refresh_balance()
+            messagebox.showinfo("成功", "挖矿成功！+100 MAB")
+        except Exception as e:
+            messagebox.showerror("错误", str(e))
+
+    def submit_bid(self):
+        """发布竞价"""
+        user_id = self.current_user_id.get()
+        content = self.entry_bid_content.get()
+        price = self.entry_bid_price.get()
+
+        if not content or not price.isdigit():
+            messagebox.showwarning("提示", "请输入内容和有效出价")
+            return
+
+        try:
+            payload = {"user_id": user_id, "content": content, "bid_amount": int(price)}
+            res = requests.post(f"{API_URL}/exchange/bid/", json=payload)
+            if res.status_code == 200:
+                messagebox.showinfo("成功", "竞价单已发布！")
+                self.entry_bid_content.delete(0, tk.END)
+                self.refresh_balance()
+                self.refresh_market()
+            else:
+                messagebox.showerror("失败", res.json().get("detail", "未知错误"))
+        except Exception as e:
+            messagebox.showerror("连接失败", str(e))
+
+    def refresh_market(self):
+        """刷新市场列表 (修复后)"""
+        try:
+            # 1. 清空 UI 列表
+            for item in self.market_list.get_children():
+                self.market_list.delete(item)
+            
+            # 2. 清空数据缓存 (现在 self.market_data_map 已经定义了，不会报错了)
+            self.market_data_map.clear()
+            
+            # 3. 请求后端
+            print("正在请求市场数据...") # Debug
+            res = requests.get(f"{API_URL}/exchange/board/")
+            
+            if res.status_code == 200:
+                data = res.json()
+                # 优先读取 list，如果没有则读取 market (兼容旧代码)
+                orders = data.get("list") or data.get("market") or []
+                
+                print(f"获取到 {len(orders)} 条订单") # Debug
+                
+                for order in orders:
+                    # 安全获取字段，防止 Key 报错
+                    bid_price = order.get('bid', order.get('amount', 0))
+                    sponsor = order.get('sponsor', order.get('user_id', 'Unknown'))
+                    content = order.get('content', '无内容')
+                    raw_data = order.get('_raw', '{}')
+                    
+                    # 插入 UI
+                    item_id = self.market_list.insert("", "end", values=(
+                        f"{bid_price}", 
+                        f"ID:{sponsor}", 
+                        content
+                    ))
+                    
+                    # 缓存原始数据
+                    self.market_data_map[item_id] = raw_data
+            else:
+                print(f"市场刷新失败: {res.status_code}")
+                
+        except Exception as e:
+            # [关键] 打印出具体的错误，而不是 pass 掉
+            print(f"❌ 渲染市场列表出错: {e}")
+            messagebox.showerror("系统错误", f"无法刷新市场: {e}")
+
+    def accept_order(self):
+        """接单合拍"""
+        selection = self.market_list.selection()
+        if not selection:
+            messagebox.showwarning("提示", "请先选择一个订单")
+            return
+            
+        item_id = selection[0]
+        raw_payload = self.market_data_map.get(item_id)
+        current_user = self.current_user_id.get()
+        
+        if not raw_payload: return
+
+        try:
+            payload = {"worker_id": current_user, "raw_payload": raw_payload}
+            res = requests.post(f"{API_URL}/exchange/accept/", json=payload)
+            
+            if res.status_code == 200:
+                data = res.json()
+                messagebox.showinfo("恭喜", data.get("msg"))
+                self.refresh_balance()
+                self.refresh_market()
+            else:
+                messagebox.showerror("失败", res.json().get("detail", "手慢了或出错了"))
+        except Exception as e:
+            messagebox.showerror("错误", str(e))
+    
     def train_ai(self):
         """调用后端训练接口"""
         try:
@@ -175,7 +385,7 @@ class TodoClientApp:
             return
 
         # 在内容里自动附带位置信息 (模拟时空上下文)
-        # 因为后端还没有 location 字段，我们把它拼在内容里，方便语义理解
+        # 因为后端还没有 location 字段，我就把它拼在内容里，方便语义理解
         full_content = f"[{location}] {content}"
 
         payload = {
@@ -199,46 +409,64 @@ class TodoClientApp:
             messagebox.showerror("连接失败", str(e))
 
     def on_complete_task(self, event):
-        """双击完成任务 -> 调用后端删除接口"""
+        """
+        双击事件处理 (Target 5: 区分 任务完成 vs 广告接单)
+        """
         selection = self.todo_tree.selection()
-        if not selection:
-            return
+        if not selection: return
 
         item = selection[0]
         values = self.todo_tree.item(item, "values")
-        task_id = values[0] # 获取 ID
-        task_content = values[1]
+        task_id = str(values[0])
+        content = values[1]
         
-        # 弹窗确认
-        confirm = messagebox.askyesno("完成任务", f"确认完成并删除任务吗？\n\n{task_content}")
-        
+        # === Branch A: if ad ===
+        if task_id in self.ad_payload_map:
+            confirm = messagebox.askyesno("接单机会", f"这是一个推荐广告任务！\n\n{content}\n\n是否立即接单赚钱？")
+            if confirm:
+                # 调用接单逻辑
+                raw_payload = self.ad_payload_map[task_id]
+                self.perform_accept_order(raw_payload)
+            return
+
+        # === Branch B: if normal task ===
+        confirm = messagebox.askyesno("完成任务", f"确认完成并删除任务吗？\n\n{content}")
         if confirm:
-            try:
-                # 发送 DELETE 请求
-                response = requests.delete(f"{API_URL}/todos/{task_id}")
-                
-                if response.status_code == 200:
-                    # UI 移除
-                    self.todo_tree.delete(item)
-                    
-                    # 交互反馈
-                    self.lbl_prediction.config(text=f"已完成: {task_content}", foreground="green")
-                    
-                    # 自动触发一次小预测 (基于刚刚完成的事)
-                    self.predict_next(last_content=task_content)
-                else:
-                    messagebox.showerror("删除失败", f"后端返回: {response.text}")
-                    
-            except Exception as e:
-                messagebox.showerror("连接错误", str(e))
+            self.delete_normal_task(task_id, item)
+
+    def perform_accept_order(self, raw_payload):
+        """执行接单 (复用逻辑)"""
+        current_user = self.current_user_id.get()
+        try:
+            payload = {"worker_id": current_user, "raw_payload": raw_payload}
+            res = requests.post(f"{API_URL}/exchange/accept/", json=payload)
+            
+            if res.status_code == 200:
+                data = res.json()
+                messagebox.showinfo("恭喜", data.get("msg"))
+                self.refresh_balance()
+                self.load_history_tasks() # 刷新列表，广告可能会消失
+            else:
+                messagebox.showerror("失败", res.json().get("detail", "接单失败"))
+        except Exception as e:
+            messagebox.showerror("错误", str(e))
+
+    def delete_normal_task(self, task_id, item_ui):
+        """执行删除普通任务"""
+        try:
+            requests.delete(f"{API_URL}/todos/{task_id}")
+            self.todo_tree.delete(item_ui)
+            self.predict_next() # 触发一次预测
+        except Exception as e:
+            print(f"删除失败: {e}")
 
     def predict_next(self, last_content=None):
         """调用预测接口"""
-        # 如果没有传内容，就用输入框里的
+        # if there's no last_content, use the entry box
         if not last_content:
             last_content = self.entry_content.get()
             if not last_content:
-                last_content = "发呆" # 默认状态
+                last_content = "发呆" # defalut status
         
         payload = {
             "content": last_content,
@@ -259,21 +487,31 @@ class TodoClientApp:
     def refresh_trending(self):
         """刷新热度榜"""
         try:
-            response = requests.get(f"{API_URL}/explore/trending")
+            # fix 3：修改 URL 为 /trending/ (对应 endpoints.py)
+            response = requests.get(f"{API_URL}/trending/")
+            
             if response.status_code == 200:
                 data = response.json()
                 items = data.get("list", [])
                 
+                # 使用 self.trend_list
                 self.trend_list.delete(0, tk.END)
+                
+                if not items:
+                    self.trend_list.insert(tk.END, "暂无热度数据...")
+
                 for item in items:
                     # 格式: 1. 喝奶茶 (🔥 50)
                     text = f"{item['rank']}. {item['content']} (🔥 {item['hot_index']})"
                     self.trend_list.insert(tk.END, text)
+            else:
+                print(f"热榜刷新失败: {response.status_code}")
+                
         except Exception as e:
-            print(e)
+            print(f"热榜错误: {e}")
 
     def search_todos(self):
-        """搜索逻辑 (修复 422 错误版)"""
+        """搜索逻辑 (修复 422 错误)"""
         query = self.entry_query.get()
         if not query:
             messagebox.showwarning("提示", "请输入搜索内容")
@@ -321,7 +559,7 @@ class TodoClientApp:
                         content = t.get("content", "未知")
                         self.search_tree.insert("", "end", values=(score, content))
             else:
-                # 打印出具体缺了什么字段，方便调试
+                #调试
                 print(f"❌ 后端拒绝 (422): {response.text}")
                 messagebox.showerror("搜索失败", f"参数错误 (422):\n后端需要完整的时间范围参数")
                 
@@ -334,35 +572,42 @@ class TodoClientApp:
         messagebox.showinfo("系统", "状态已刷新")
         
     def load_history_tasks(self):
-        """从后端加载历史记录"""
+        """加载历史任务 (Target 5: 渲染混入的广告)"""
         try:
-            # 调用刚才写的 GET /todos/ 接口
+            # clear cache
+            self.ad_payload_map.clear()
+            
             response = requests.get(f"{API_URL}/todos/")
             
             if response.status_code == 200:
                 tasks = response.json()
-                # 清空现有列表
+                # clear UI
                 for item in self.todo_tree.get_children():
                     self.todo_tree.delete(item)
                 
-                # 填充数据
                 for task in tasks:
-                    # 这里的字段名要和 schemas.TodoResponse 一致
                     t_id = task.get('id')
                     t_content = task.get('content')
                     t_time = task.get('start_time')
+                    is_ad = task.get('is_ad', False) # get ad flag
                     
-                    # 插入到列表 (index='end' 表示追加到底部)
-                    self.todo_tree.insert("", "end", values=(t_id, t_content, t_time))
+                    if is_ad:
+                        #如果是广告：
+                        # 1. 存入 payload 方便点击时调用
+                        self.ad_payload_map[str(t_id)] = task.get('ad_payload')
+                        # 2. 插入时带上 'ad' 标签 -> 变色
+                        self.todo_tree.insert("", "end", values=(t_id, t_content, "📢 推广"), tags=('ad',))
+                    else:
+                        # 普通任务
+                        self.todo_tree.insert("", "end", values=(t_id, t_content, t_time))
                     
-                print(f"DEBUG: 成功加载了 {len(tasks)} 条历史任务")
+                print(f"DEBUG: 加载完成，含广告: {len(self.ad_payload_map)} 条")
             else:
-                print("后端无数据或连接失败")
+                print("后端无数据")
                 
         except Exception as e:
-            print(f"无法加载历史记录: {e}")
-            # 不弹窗报错，以免影响用户打开软件的体验，只在后台输出
-
+            print(f"无法加载历史: {e}")
+            
 if __name__ == "__main__":
     root = tk.Tk()
     app = TodoClientApp(root)
