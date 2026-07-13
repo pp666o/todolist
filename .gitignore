@@ -22,3 +22,7 @@ pgvector/
 
 # --- 安全 ---
 .env
+# Local imported data
+data/raw/
+data/processed/
+*.tsv

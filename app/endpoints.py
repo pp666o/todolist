@@ -77,16 +77,8 @@ async def mine_currency(user_id: int):
     功能：点击一次，给用户余额增加 100 MAB
     """
     try:
-        # 1.get redis client
-        redis = await redis_client.get_client()
-        
-        # 2.key point：务必必须一定！！！使用与 'get_user_balance' 接口完全一致的 Key
-        # 之前定义的读取 Key 是: f"user:{user_id}:balance"
-        key = f"user:{user_id}:balance"
-        
-        # 3.使用 Redis 的 incrby 原子操作增加金额
-        # 如果 Key 不存在，Redis 会自动将其初始化为 0 然后加 100
-        new_balance = await redis.incrby(key, 100)
+        # Reuse the same wallet key convention as get_balance/add_mab.
+        new_balance = await redis_client.add_mab(str(user_id), 100)
         
         print(f"💰 用户 {user_id} 挖矿成功，当前余额: {new_balance}")
         
@@ -289,14 +281,20 @@ async def read_todos_mixed(skip: int = 0, limit: int = 100, db: Session = Depend
 # ---  make Todo API ---
 @router.post("/todos/", response_model=schemas.TodoResponse)
 async def create_todo(todo: schemas.TodoCreate, db: Session = Depends(database.get_db)):
-    # 1. 存入 PostgreSQL
-    db_todo = models.Todo(content=todo.content, start_time=todo.start_time)
+    # Generate and persist the vector before committing. Otherwise the item
+    # disappears from semantic search after the process restarts.
+    vector = utils.get_embedding(todo.content)
+    db_todo = models.Todo(
+        content=todo.content,
+        start_time=todo.start_time,
+        source="manual",
+        embedding=vector,
+    )
     db.add(db_todo)
     db.commit()
     db.refresh(db_todo)
 
     # 2. 同步到 C++ 向量引擎
-    vector = utils.get_embedding(db_todo.content)
     try:
         global_engine.add_todo(
             db_todo.id, 
@@ -324,7 +322,7 @@ async def create_todo(todo: schemas.TodoCreate, db: Session = Depends(database.g
 
     return db_todo
 
-@router.get("/todos/", response_model=List[schemas.TodoResponse])
+@router.get("/todos/raw/", response_model=List[schemas.TodoResponse])
 def read_todos(skip: int = 0, limit: int = 100, db: Session = Depends(database.get_db)):
     """
     获取历史任务列表 (默认返回最近的 100 条)
@@ -412,7 +410,7 @@ async def get_trending_now():
     数据源：Redis Sorted Set
     """
     try:
-        redis = await redis_client.get_client()
+        redis = redis_client.get_client()
         
         # ZREVRANGE: 从大到小取前 10 名
         # withscores=True 会同时返回分数

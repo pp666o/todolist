@@ -36,9 +36,9 @@ class VectorEngine:
             return
             
         try:
-            todos = db_session.query(models.Todo).all()
+            query = db_session.query(models.Todo).yield_per(1000)
             count = 0
-            for todo in todos:
+            for todo in query:
                 if todo.embedding is not None and todo.created_at is not None:
                     # fix 2: change time stamps (C++ endd long long)
                     ts = int(todo.created_at.timestamp())

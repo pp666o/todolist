@@ -10,3 +10,4 @@ pandas
 numpy
 redis
 jieba
+pybind11

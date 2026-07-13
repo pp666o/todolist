@@ -4,7 +4,6 @@ from .database import engine, Base, SessionLocal
 from .endpoints import router
 from .services.redis_service import redis_client #redis service
 from .services.engine_service import global_engine
-from . import endpoints
 
 #创建数据库表
 Base.metadata.create_all(bind=engine)
@@ -39,7 +38,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(router)
-app.include_router(endpoints.router, prefix="/mab", tags=["MAB Backend"])
 
 @app.get("/")
 def root():
@@ -49,7 +47,7 @@ def root():
 @app.get("/engine/status")
 def engine_status():
     #这里hack一下去访问私有变量(演示用的)
-    count = global_engine._engine.size()
+    count = global_engine.core.size() if global_engine.core else 0
     return {"engine_item_count": count}
 
 if __name__ == "__main__":
