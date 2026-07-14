@@ -1,87 +1,183 @@
-import sys
+from __future__ import annotations
+
 import os
+import sys
 import time
+
 from app import models
 
-#path os manipulation to import C++ module
+
 current_dir = os.path.dirname(os.path.abspath(__file__))
-cpp_core_path = os.path.join(current_dir, "../../cpp_core")
+cpp_core_path = os.path.abspath(
+    os.path.join(current_dir, "../../cpp_core")
+)
+
 if cpp_core_path not in sys.path:
     sys.path.append(cpp_core_path)
 
-#import C++ todo_core module
 try:
-    import todo_core # type: ignore
+    import todo_core  # type: ignore
 except ImportError:
     todo_core = None
 
-#engine service class
+
 class VectorEngine:
-    def __init__(self):
+    def __init__(self) -> None:
         self.core = None
-        if todo_core:
-            try:
-                # fix 1: Class name must be TodoEngine (TO -> matcher.cpp)
-                self.core = todo_core.TodoEngine()
-                print(">>> [C++ Engine] Core initialized successfully (TodoEngine).")
-            except Exception as e:
-                print(f"❌ [C++ Engine] 初始化失败: {e}")
-                print(f"    模块内容: {dir(todo_core)}") #debug
-        else:
+
+        if todo_core is None:
             print("⚠️ [C++ Engine] 模块未导入，运行在降级模式")
-
-    def reload_from_db(self, db_session):
-        """从数据库全量加载数据"""
-        if not self.core:
             return
-            
+
         try:
-            query = db_session.query(models.Todo).yield_per(1000)
+            self.core = todo_core.TodoEngine()
+            print(
+                ">>> [C++ Engine] "
+                "Core initialized successfully (TodoEngine)."
+            )
+        except Exception as exc:
+            print(f"❌ [C++ Engine] 初始化失败: {exc}")
+            print(f"    模块内容: {dir(todo_core)}")
+
+    def reload_from_db(self, db_session) -> int:
+        """清空内存索引，然后从 PostgreSQL 全量恢复。"""
+        if self.core is None:
+            return 0
+
+        try:
+            self.core.clear()
+
+            query = (
+                db_session.query(models.Todo)
+                .filter(
+                    models.Todo.embedding.isnot(None),
+                    models.Todo.created_at.isnot(None),
+                )
+                .yield_per(1000)
+            )
+
             count = 0
+
             for todo in query:
-                if todo.embedding is not None and todo.created_at is not None:
-                    # fix 2: change time stamps (C++ endd long long)
-                    ts = int(todo.created_at.timestamp())
-                    
-                    # fix 3: put 4 parameters
-                    self.core.add_todo(todo.id, ts, todo.content, todo.embedding)
-                    count += 1
-            print(f">>> [C++ Engine] Reloaded {count} items.")
-        except Exception as e:
-            print(f"❌ [C++ Engine] 重载数据失败: {e}")
+                timestamp = int(todo.created_at.timestamp())
 
-    def search(self, start_ts: int, end_ts: int, query_vector: list, top_k: int = 5):
-        """
-        调用 C++ 进行检索 (支持时间范围)
-        """
-        if not self.core:
+                self.core.upsert_todo(
+                    todo.id,
+                    timestamp,
+                    todo.content,
+                    todo.embedding,
+                )
+                count += 1
+
+            print(
+                f">>> [C++ Engine] Reloaded {count} items. "
+                f"Current size={self.core.size()}."
+            )
+            return count
+
+        except Exception as exc:
+            print(f"❌ [C++ Engine] 重载数据失败: {exc}")
+            return 0
+
+    def search(
+        self,
+        start_ts: int,
+        end_ts: int,
+        query_vector: list[float],
+        top_k: int = 5,
+    ):
+        if self.core is None:
             return []
-        
+
         try:
-            # get C++: search(start_ts, end_ts, vector, topk)
-            # Notice强调！：直接透传 endpoint 传过来的 start_ts 和 end_ts
-            return self.core.search(start_ts, end_ts, query_vector, top_k)
-        except Exception as e:
-            print(f"❌ [C++ Engine] 搜索失败: {e}")
+            return self.core.search(
+                start_ts,
+                end_ts,
+                query_vector,
+                top_k,
+            )
+        except Exception as exc:
+            print(f"❌ [C++ Engine] 搜索失败: {exc}")
             return []
 
-    def add_todo(self, todo_id: int, content: str, created_at, vector: list):
-        """
-        实时添加任务
-        注意：参数变多了，因为 C++ 引擎现在更强大了，需要存内容和时间
-        """
-        if not self.core:
-            return
+    def upsert_todo(
+        self,
+        todo_id: int,
+        content: str,
+        created_at,
+        vector: list[float],
+    ) -> bool:
+        if self.core is None or vector is None:
+            return False
 
-        if vector is not None:
-            try:
-                #set timestamp
-                ts = int(created_at.timestamp()) if created_at else int(time.time())
-                
-                #get C++ API right
-                self.core.add_todo(todo_id, ts, content, vector)
-                print(f">>> [C++ Engine] Added item {todo_id} to memory.")
-            except Exception as e:
-                print(f"❌ [C++ Engine] 添加任务失败: {e}")
+        try:
+            timestamp = (
+                int(created_at.timestamp())
+                if created_at
+                else int(time.time())
+            )
+
+            inserted = self.core.upsert_todo(
+                todo_id,
+                timestamp,
+                content,
+                vector,
+            )
+
+            action = "Inserted" if inserted else "Updated"
+            print(
+                f">>> [C++ Engine] "
+                f"{action} item {todo_id}. "
+                f"Current size={self.core.size()}."
+            )
+            return True
+
+        except Exception as exc:
+            print(f"❌ [C++ Engine] Upsert 失败: {exc}")
+            return False
+
+    def add_todo(
+        self,
+        todo_id: int,
+        content: str,
+        created_at,
+        vector: list[float],
+    ) -> bool:
+        # 兼容现有 endpoint；实际执行 upsert。
+        return self.upsert_todo(
+            todo_id,
+            content,
+            created_at,
+            vector,
+        )
+
+    def remove_todo(self, todo_id: int) -> bool:
+        if self.core is None:
+            return False
+
+        try:
+            removed = bool(self.core.remove_todo(todo_id))
+
+            print(
+                f">>> [C++ Engine] Remove item {todo_id}: "
+                f"removed={removed}, "
+                f"current_size={self.core.size()}."
+            )
+            return removed
+
+        except Exception as exc:
+            print(f"❌ [C++ Engine] 删除失败: {exc}")
+            return False
+
+    def clear(self) -> None:
+        if self.core is not None:
+            self.core.clear()
+
+    def size(self) -> int:
+        if self.core is None:
+            return 0
+
+        return int(self.core.size())
+
 
 global_engine = VectorEngine()

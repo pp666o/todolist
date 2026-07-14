@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from . import models, schemas, database, utils
 from .services.engine_service import global_engine
+from .services.post_search_service import search_posts as search_posts_service
 from .services.ml_engine import global_model
 from .services.redis_service import redis_client
 from .services.ml_engine import predictor
@@ -348,6 +349,32 @@ async def search_todos(request: schemas.SearchRequest):
     
     return {"results": results}
 
+@router.post(
+    "/search/posts",
+    response_model=schemas.PostSearchResponse,
+)
+def search_posts_endpoint(
+    request: schemas.PostSearchRequest,
+    db: Session = Depends(database.get_db),
+):
+    has_latitude = request.latitude is not None
+    has_longitude = request.longitude is not None
+
+    if has_latitude != has_longitude:
+        raise HTTPException(
+            status_code=400,
+            detail="latitude 和 longitude 必须同时提供",
+        )
+
+    if request.radius_km is not None and not has_latitude:
+        raise HTTPException(
+            status_code=400,
+            detail="使用 radius_km 时必须提供 latitude 和 longitude",
+        )
+
+    return search_posts_service(db, request)
+
+
 @router.post("/train/{user_id}")
 def train_model(user_id: int, db: Session = Depends(database.get_db)):
     """
@@ -465,10 +492,16 @@ def delete_todo(todo_id: int, db: Session = Depends(database.get_db)):
         # 2. 只有关联数据删干净了，才能删除主任务
         db.delete(db_todo)
         db.commit()
-        
-        # C++ 引擎同步删除 (如果有接口的话，目前没有只能忽略)
-        
-        return {"status": "success", "message": f"Task {todo_id} deleted"}
+
+        # PostgreSQL 是事实源。提交成功后同步删除内存索引；
+        # 即使索引删除失败，服务重启时全量 reload 也会自动修复。
+        index_removed = global_engine.remove_todo(todo_id)
+
+        return {
+            "status": "success",
+            "message": f"Task {todo_id} deleted",
+            "index_removed": index_removed,
+        }
         
     except Exception as e:
         db.rollback() # 出错回滚
