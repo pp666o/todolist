@@ -1,11 +1,22 @@
+import os
 import redis.asyncio as redis
 import json
 import time
 
 class RedisService:
     def __init__(self):
-        # 连接本地 Redis
-        self.r = redis.from_url("redis://localhost", decode_responses=True)
+        # Local development defaults to localhost. Remote environments
+        # should provide REDIS_URL through .env or process variables.
+        self.redis_url = os.getenv(
+            "REDIS_URL",
+            "redis://127.0.0.1:6379/0",
+        )
+        self.r = redis.from_url(
+            self.redis_url,
+            decode_responses=True,
+            socket_connect_timeout=5,
+            socket_timeout=5,
+        )
         
         # === Keys define ===
         self.TRENDING_KEY = "todo_trending"     # Target 3: 全网热度榜

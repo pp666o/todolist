@@ -11,3 +11,4 @@ numpy
 redis
 jieba
 pybind11
+PyMySQL

@@ -26,3 +26,25 @@ pgvector/
 data/raw/
 data/processed/
 *.tsv
+.venv/
+*.pyd
+build/
+.pytest_cache/
+.cache/
+data/*.tsv
+
+# Local environment
+
+# Runtime files
+.fastapi.pid
+logs/
+
+# Imported data
+
+# Python
+
+# C++ build artifacts
+cpp_core/*.so
+
+# Temporary backups
+*.bak.*
