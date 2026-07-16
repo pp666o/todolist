@@ -1,0 +1,7 @@
+nohup: ignoring input
+INFO:     Will watch for changes in these directories: ['/home/ubuntu/recom']
+ERROR:    [Errno 98] Address already in use
+Calculating item popularity for the last 30 days...
+No interactions found in the time window to calculate popularity.
+[WARNING] Frontend directory not found at /home/ubuntu/recom/frontend/dist. Static file serving disabled.
+Starting server via main.py...

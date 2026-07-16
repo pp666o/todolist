@@ -1,0 +1,234 @@
+INFO:     Will watch for changes in these directories: ['/home/ubuntu/recom']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [3942710] using WatchFiles
+Calculating item popularity for the last 30 days...
+No interactions found in the time window to calculate popularity.
+[WARNING] Frontend directory not found at /home/ubuntu/recom/frontend/dist. Static file serving disabled.
+Starting server via main.py...
+INFO:     Started server process [3942745]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Will watch for changes in these directories: ['/home/ubuntu/recom']
+ERROR:    [Errno 98] Address already in use
+Calculating item popularity for the last 30 days...
+No interactions found in the time window to calculate popularity.
+[WARNING] Frontend directory not found at /home/ubuntu/recom/frontend/dist. Static file serving disabled.
+Starting server via main.py...
+Calculating item popularity for the last 30 days...
+No interactions found in the time window to calculate popularity.
+[WARNING] Frontend directory not found at /home/ubuntu/recom/frontend/dist. Static file serving disabled.
+[WARNING] Frontend directory not found at /home/ubuntu/recom/frontend/dist. Static file serving disabled.
+--- [API Startup] 安排推荐引擎数据加载任务 --- 
+--- [API Startup] 开始加载推荐引擎数据 ---
+--- [Data Loader] 开始从本地文件加载数据 ---
+--- [Data Loader] Loaded 200 users from /home/ubuntu/recom/data/users.json ---
+--- [Data Loader] Loaded 500 items from /home/ubuntu/recom/data/items.json ---
+--- [Data Loader] Loaded 5100 interactions from /home/ubuntu/recom/data/interactions.json ---
+--- [Data Loader] 数据加载完成: 200 用户, 500 物品, 5100 交互 ---
+--- [API Startup] 加载到推荐引擎中: 200用户, 500物品, 5100交互 ---
+--- [API Startup] 推荐引擎数据加载失败: 'RecommendationEngine' object has no attribute 'add_batch_user_profiles' ---
+--- [API Startup] 推荐引擎数据加载任务完成. 服务器就绪. ---
+--- [API Startup] 安排匹配引擎数据加载任务 --- 
+--- [API Startup] 开始加载匹配引擎数据 ---
+--- [Data Loader] 开始从本地文件加载数据 ---
+--- [Data Loader] Loaded 200 users from /home/ubuntu/recom/data/users.json ---
+--- [Data Loader] Loaded 500 items from /home/ubuntu/recom/data/items.json ---
+--- [Data Loader] Loaded 5100 interactions from /home/ubuntu/recom/data/interactions.json ---
+--- [Data Loader] 数据加载完成: 200 用户, 500 物品, 5100 交互 ---
+--- [API Startup] 加载到匹配引擎中: 200用户, 500物品, 5100交互 ---
+--- [API Startup] 添加 200 用户到匹配引擎 ---
+--- [API Startup] 添加 500 物品到匹配引擎 ---
+--- [API Startup] 添加 5100/5100 交互到匹配引擎 ---
+--- [API Startup] 匹配引擎数据加载完成 ---
+--- [API Startup] 匹配引擎数据加载任务完成. 服务器就绪. ---
+--- Finding potential matches for user 0001 with params: top_k=10, min_similarity=0.3, min_complementarity=0.3, gender_filter=male ---
+--- Found 7 potential matches for user 0001 ---
+INFO:     127.0.0.1:42516 - "GET /matching/potential-matches/0001?top_k=10&min_similarity=0.3&min_complementarity=0.3&gender_filter=male HTTP/1.1" 200 OK
+--- Generating match dashboard for users 0001 and user_0191 ---
+--- Match dashboard generated successfully ---
+INFO:     127.0.0.1:42530 - "GET /matching/match-dashboard/0001/user_0191 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52532 - "GET /matching/relationship-compatibility/0001/user_0191 HTTP/1.1" 200 OK
+--- Finding potential matches for user 0001 with params: top_k=10, min_similarity=0.3, min_complementarity=0.3, gender_filter=male ---
+--- Found 7 potential matches for user 0001 ---
+INFO:     127.0.0.1:53898 - "GET /matching/potential-matches/0001?top_k=10&min_similarity=0.3&min_complementarity=0.3&gender_filter=male HTTP/1.1" 200 OK
+--- Generating match dashboard for users 0001 and user_0159 ---
+--- Match dashboard generated successfully ---
+INFO:     127.0.0.1:46424 - "GET /matching/match-dashboard/0001/user_0159 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46428 - "GET /matching/relationship-compatibility/0001/user_0159 HTTP/1.1" 200 OK
+--- Generating match dashboard for users 0001 and user_0159 ---
+--- Match dashboard generated successfully ---
+INFO:     127.0.0.1:40250 - "GET /matching/match-dashboard/0001/user_0159 HTTP/1.1" 200 OK
+--- Finding potential matches for user 0001 with params: top_k=10, min_similarity=0.3, min_complementarity=0.3, gender_filter=male ---
+--- Found 7 potential matches for user 0001 ---
+INFO:     127.0.0.1:47876 - "GET /matching/potential-matches/0001?top_k=10&min_similarity=0.3&min_complementarity=0.3&gender_filter=male HTTP/1.1" 200 OK
+--- Finding potential matches for user 0009 with params: top_k=17, min_similarity=0.3, min_complementarity=0.3, gender_filter=female ---
+--- Found 8 potential matches for user 0009 ---
+INFO:     127.0.0.1:52538 - "GET /matching/potential-matches/0009?top_k=17&min_similarity=0.3&min_complementarity=0.3&gender_filter=female HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0162 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:52112 - "GET /matching/recommend-for-pair/0009/user_0162?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0162 with item_type=travel, top_k=10 ---
+--- Generated 0 recommendations for user pair ---
+INFO:     127.0.0.1:35598 - "GET /matching/recommend-for-pair/0009/user_0162?top_k=10&item_type=travel HTTP/1.1" 200 OK
+--- Generating match dashboard for users 0009 and user_0162 ---
+--- Match dashboard generated successfully ---
+INFO:     127.0.0.1:56918 - "GET /matching/match-dashboard/0009/user_0162 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56924 - "GET /matching/relationship-compatibility/0009/user_0162 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0162 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:56926 - "GET /matching/recommend-for-pair/0009/user_0162?top_k=10 HTTP/1.1" 200 OK
+--- Generating match dashboard for users 0009 and user_0162 ---
+--- Match dashboard generated successfully ---
+INFO:     127.0.0.1:34328 - "GET /matching/match-dashboard/0009/user_0162 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34344 - "GET /matching/relationship-compatibility/0009/user_0162 HTTP/1.1" 200 OK
+--- Generating match dashboard for users 0009 and user_0162 ---
+--- Match dashboard generated successfully ---
+INFO:     127.0.0.1:55786 - "GET /matching/match-dashboard/0009/user_0162 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55796 - "GET /matching/relationship-compatibility/0009/user_0162 HTTP/1.1" 200 OK
+--- Finding potential matches for user 0090 with params: top_k=10, min_similarity=0.3, min_complementarity=0.3, gender_filter=other ---
+--- Found 0 potential matches for user 0090 ---
+INFO:     127.0.0.1:34346 - "GET /matching/potential-matches/0090?top_k=10&min_similarity=0.3&min_complementarity=0.3&gender_filter=other HTTP/1.1" 200 OK
+--- Finding potential matches for user 0090 with params: top_k=10, min_similarity=0.3, min_complementarity=0.3, gender_filter=None ---
+--- Found 10 potential matches for user 0090 ---
+INFO:     127.0.0.1:34362 - "GET /matching/potential-matches/0090?top_k=10&min_similarity=0.3&min_complementarity=0.3 HTTP/1.1" 200 OK
+--- Finding potential matches for user 0009 with params: top_k=17, min_similarity=0.3, min_complementarity=0.3, gender_filter=female ---
+--- Found 8 potential matches for user 0009 ---
+INFO:     127.0.0.1:54818 - "GET /matching/potential-matches/0009?top_k=17&min_similarity=0.3&min_complementarity=0.3&gender_filter=female HTTP/1.1" 200 OK
+--- Generating match dashboard for users 0009 and user_0162 ---
+--- Match dashboard generated successfully ---
+INFO:     127.0.0.1:33720 - "GET /matching/match-dashboard/0009/user_0162 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33768 - "GET /matching/relationship-compatibility/0009/user_0162 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0162 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:33770 - "GET /matching/recommend-for-pair/0009/user_0162?top_k=10 HTTP/1.1" 200 OK
+--- Finding potential matches for user 0090 with params: top_k=31, min_similarity=0.3, min_complementarity=0.3, gender_filter=None ---
+--- Found 27 potential matches for user 0090 ---
+INFO:     127.0.0.1:39896 - "GET /matching/potential-matches/0090?top_k=31&min_similarity=0.3&min_complementarity=0.3 HTTP/1.1" 200 OK
+--- Generating match dashboard for users 0090 and user_0085 ---
+--- Match dashboard generated successfully ---
+INFO:     127.0.0.1:40352 - "GET /matching/match-dashboard/0090/user_0085 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40354 - "GET /matching/relationship-compatibility/0090/user_0085 HTTP/1.1" 200 OK
+--- Finding potential matches for user 0090 with params: top_k=31, min_similarity=0.3, min_complementarity=0.3, gender_filter=None ---
+--- Found 27 potential matches for user 0090 ---
+INFO:     127.0.0.1:34890 - "GET /matching/potential-matches/0090?top_k=31&min_similarity=0.3&min_complementarity=0.3 HTTP/1.1" 200 OK
+--- Generating match dashboard for users 0090 and user_0085 ---
+--- Match dashboard generated successfully ---
+INFO:     127.0.0.1:60122 - "GET /matching/match-dashboard/0090/user_0085 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60134 - "GET /matching/relationship-compatibility/0090/user_0085 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51918 - "GET /matching/relationship-compatibility/0090/user_0085 HTTP/1.1" 200 OK
+--- Generating match dashboard for users 0090 and user_0085 ---
+--- Match dashboard generated successfully ---
+INFO:     127.0.0.1:44584 - "GET /matching/match-dashboard/0090/user_0085 HTTP/1.1" 200 OK
+--- Generating match dashboard for users 0090 and user_0085 ---
+--- Match dashboard generated successfully ---
+INFO:     127.0.0.1:36956 - "GET /matching/match-dashboard/0090/user_0085 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36966 - "GET /matching/relationship-compatibility/0090/user_0085 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0090 and user_0085 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:39410 - "GET /matching/recommend-for-pair/0090/user_0085?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0090 and user_0085 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:37272 - "GET /matching/recommend-for-pair/0090/user_0085?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0090 and user_0085 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:40740 - "GET /matching/recommend-for-pair/0090/user_0085?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0090 and user_0085 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:55062 - "GET /matching/recommend-for-pair/0090/user_0085?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0090 and user_0085 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:56494 - "GET /matching/recommend-for-pair/0090/user_0085?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0090 and user_0085 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:55936 - "GET /matching/recommend-for-pair/0090/user_0085?top_k=10 HTTP/1.1" 200 OK
+--- Finding potential matches for user 0001 with params: top_k=10, min_similarity=0.3, min_complementarity=0.3, gender_filter=male ---
+--- Found 7 potential matches for user 0001 ---
+INFO:     127.0.0.1:56624 - "GET /matching/potential-matches/0001?top_k=10&min_similarity=0.3&min_complementarity=0.3&gender_filter=male HTTP/1.1" 200 OK
+--- Generating match dashboard for users 0001 and user_0016 ---
+--- Match dashboard generated successfully ---
+INFO:     127.0.0.1:56640 - "GET /matching/match-dashboard/0001/user_0016 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56656 - "GET /matching/relationship-compatibility/0001/user_0016 HTTP/1.1" 200 OK
+--- Finding potential matches for user 0009 with params: top_k=10, min_similarity=0.3, min_complementarity=0.3, gender_filter=female ---
+--- Found 8 potential matches for user 0009 ---
+INFO:     127.0.0.1:39822 - "GET /matching/potential-matches/0009?top_k=10&min_similarity=0.3&min_complementarity=0.3&gender_filter=female HTTP/1.1" 200 OK
+--- Finding potential matches for user 0009 with params: top_k=34, min_similarity=0.3, min_complementarity=0.3, gender_filter=female ---
+--- Found 8 potential matches for user 0009 ---
+INFO:     127.0.0.1:59342 - "GET /matching/potential-matches/0009?top_k=34&min_similarity=0.3&min_complementarity=0.3&gender_filter=female HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:59352 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=travel, top_k=10 ---
+--- Generated 0 recommendations for user pair ---
+INFO:     127.0.0.1:58222 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10&item_type=travel HTTP/1.1" 200 OK
+--- Finding potential matches for user 0009 with params: top_k=34, min_similarity=0.3, min_complementarity=0.3, gender_filter=female ---
+--- Found 8 potential matches for user 0009 ---
+INFO:     127.0.0.1:54554 - "GET /matching/potential-matches/0009?top_k=34&min_similarity=0.3&min_complementarity=0.3&gender_filter=female HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:51816 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:40454 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:35080 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:47208 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:40012 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:56758 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:49366 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:46076 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:56666 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:56972 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:58124 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:35628 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:32868 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:57322 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:59370 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:44678 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:59910 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:52990 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:59532 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:34292 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:36278 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:44616 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10 HTTP/1.1" 200 OK
+--- Generating recommendations for user pair 0009 and user_0122 with item_type=None, top_k=10 ---
+--- Generated 10 recommendations for user pair ---
+INFO:     127.0.0.1:60674 - "GET /matching/recommend-for-pair/0009/user_0122?top_k=10 HTTP/1.1" 200 OK

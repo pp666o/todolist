@@ -1,0 +1,12 @@
+nohup: ignoring input
+
+> recommendation-matching-frontend@0.1.0 dev
+> vite --host 0.0.0.0
+
+
+  VITE v4.5.13  ready in 341 ms
+
+  ➜  Local:   http://localhost:8890/
+  ➜  Network: http://10.0.4.9:8890/
+  ➜  Network: http://172.17.0.1:8890/
+  ➜  Network: http://172.18.0.1:8890/

@@ -1,50 +1,60 @@
-#--- Python 垃圾文件 ---
-__pycache__/
-*.py[cod]
-*$py.class
-.venv
+# Environment
+.env
+.env.*
+!.env.example
+.venv/
 venv/
 env/
 
-
-#忽略 cpp_core 下的 build 文件夹
-cpp_core/build/
-#忽略编译出来的 .so 文件 和其他中间文件
-*.so
-*.o
-*.dylib
-
-#--- Mac 系统文件 ---
-.DS_Store
-
-#--- 外部依赖库 ---
-pgvector/
-
-# --- 安全 ---
-.env
-# Local imported data
-data/raw/
-data/processed/
-*.tsv
-.venv/
-*.pyd
-build/
-.pytest_cache/
-.cache/
-data/*.tsv
-
-# Local environment
-
-# Runtime files
-.fastapi.pid
-logs/
-
-# Imported data
-
 # Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# C++ build artifacts
-cpp_core/*.so
+# Node
+node_modules/
+frontend/node_modules/
+dist/
+build/
 
-# Temporary backups
-*.bak.*
+# Logs
+*.log
+nohup.out
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+__MACOSX/
+._*
+
+# Archives
+*.zip
+*.tar.gz
+
+# Secrets and keys
+*.pem
+*.key
+
+# Temporary files
+*.tmp
+*.swp
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS metadata
+__MACOSX/
+.DS_Store
+._*
+
+# Frontend dependencies
+frontend/node_modules/
+node_modules/

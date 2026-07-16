@@ -1,0 +1,38 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# curosor.rule for Recommendation & Matching System
+
+# 定义项目的主要语言
+language: python
+
+# 定义关键组件或概念
+components:
+  - name: FastAPI Backend
+    paths:
+      - main.py
+      - app/**
+    description: The core backend service built with FastAPI.
+
+  - name: Recommendation API
+    paths:
+      - app/api/recommendation_api.py
+    description: API endpoints for providing recommendations.
+
+  - name: Matching API
+    paths:
+      - app/api/matching_api.py
+    description: API endpoints for user matching.
+
+  - name: Frontend Integration
+    paths:
+      - main.py # Handles serving static files
+      - frontend/**
+    description: Integration and serving of the frontend application.
+
+# 定义重要的数据目录 (如果适用)
+data_directories:
+  - path: data/
+    description: Directory likely containing data used for recommendations or matching. 
