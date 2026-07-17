@@ -42,14 +42,6 @@ async def load_engine_data():
     except Exception as e:
         print(f"--- [API Startup] 匹配引擎数据加载失败: {e} ---")
 
-# --- 注册 FastAPI 启动事件 --- 
-@router.on_event("startup")
-async def startup_event():
-    """FastAPI 应用启动时触发"""
-    print("--- [API Startup] 安排匹配引擎数据加载任务 --- ")
-    await load_engine_data()
-    print("--- [API Startup] 匹配引擎数据加载任务完成. 服务器就绪. ---")
-
 # 数据模型
 class UserProfile(BaseModel):
     user_id: str

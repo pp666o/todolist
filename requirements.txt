@@ -7,3 +7,7 @@ scipy
 networkx
 pydantic
 pydantic-settings
+
+psycopg[binary]>=3.2,<4
+pymysql>=1.1,<2
+redis>=6.2,<9

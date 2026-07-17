@@ -1,9 +1,11 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse
 import os
-from app.api import recommendation_api, matching_api
+from app.api import matching_api, post_search
 import uvicorn # 添加 uvicorn 导入以便直接运行
 
 # --- 配置前端文件路径 ---
@@ -11,11 +13,21 @@ import uvicorn # 添加 uvicorn 导入以便直接运行
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "frontend", "dist")
 INDEX_HTML = os.path.join(FRONTEND_DIR, "index.html")
 
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Initialize application resources once per process."""
+    print("--- [App Startup] 开始初始化匹配引擎 ---")
+    await matching_api.load_engine_data()
+    print("--- [App Startup] 匹配引擎初始化完成 ---")
+    yield
+
+
 # 创建 FastAPI 应用实例
 app = FastAPI(
     title="Recommendation & Matching System API",
     description="Provides personalized recommendations and user matching.",
-    version="0.1.0"
+    version="0.1.0",
+    lifespan=lifespan,
 )
 
 # --- 添加 CORS 中间件 ---
@@ -32,8 +44,8 @@ app.add_middleware(
 # --- 结束 CORS 配置 ---
 
 # 包含 API 路由 (放在 CORS 之后)
-app.include_router(recommendation_api.router)
 app.include_router(matching_api.router)
+app.include_router(post_search.router)
 
 @app.get("/api", tags=["Root"])
 async def read_api_root():
