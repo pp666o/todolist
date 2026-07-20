@@ -45,8 +45,12 @@ def test_real_candidate_filters() -> None:
             )
         )
 
-        assert any(
-            row["source_id"] == "5891"
+        assert bbox_rows
+        assert all(
+            row["latitude"] is not None
+            and row["longitude"] is not None
+            and 37.68 <= float(row["latitude"]) <= 37.70
+            and 112.75 <= float(row["longitude"]) <= 112.77
             for row in bbox_rows
         )
 

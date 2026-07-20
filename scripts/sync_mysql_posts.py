@@ -1,7 +1,10 @@
 """Synchronize posts from remote MySQL into PostgreSQL."""
 
+from __future__ import annotations
+
 import argparse
 import asyncio
+import time
 from collections import Counter
 from typing import Any
 
@@ -16,6 +19,11 @@ from app.services.mysql_post_mapper import (
     MYSQL_POST_SOURCE,
     map_mysql_post_row,
 )
+
+
+DEFAULT_BATCH_SIZE = 1000
+DEFAULT_MAX_ROWS = 1000
+MAX_BATCH_SIZE = 10000
 
 
 MYSQL_POST_COLUMNS = """
@@ -43,7 +51,10 @@ MYSQL_POST_COLUMNS = """
 """
 
 
-def read_mysql_posts(limit: int, after_id: int) -> list[dict[str, Any]]:
+def read_mysql_posts(
+    limit: int,
+    after_id: int,
+) -> list[dict[str, Any]]:
     """Read one deterministic batch from the remote MySQL source."""
     get_mysql_source_settings.cache_clear()
     settings = get_mysql_source_settings()
@@ -111,7 +122,9 @@ async def read_postgres_summary() -> dict[str, Any]:
             status_rows = await cursor.fetchall()
 
     if summary is None:
-        raise RuntimeError("PostgreSQL synchronization summary was empty.")
+        raise RuntimeError(
+            "PostgreSQL synchronization summary was empty."
+        )
 
     return {
         **summary,
@@ -126,84 +139,269 @@ async def read_postgres_summary() -> dict[str, Any]:
     }
 
 
-async def synchronize(limit: int, after_id: int) -> None:
-    """Read, validate, and upsert one MySQL batch."""
-    raw_rows = read_mysql_posts(limit=limit, after_id=after_id)
+def validate_sync_parameters(
+    *,
+    batch_size: int,
+    after_id: int,
+    max_rows: int | None,
+) -> None:
+    """Validate synchronization controls."""
+    if not 1 <= batch_size <= MAX_BATCH_SIZE:
+        raise ValueError(
+            f"batch_size must be between 1 and {MAX_BATCH_SIZE}."
+        )
 
-    if not raw_rows:
-        print("No MySQL rows matched the requested range.")
-        return
+    if after_id < 0:
+        raise ValueError("after_id cannot be negative.")
 
-    posts = [map_mysql_post_row(row) for row in raw_rows]
+    if max_rows is not None and max_rows < 1:
+        raise ValueError("max_rows must be positive when provided.")
 
-    unique_source_ids = {post.source_id for post in posts}
-    if len(unique_source_ids) != len(posts):
-        raise RuntimeError("Duplicate source IDs were found in the MySQL batch.")
 
-    category_counts = Counter(post.category for post in posts)
-    status_counts = Counter(post.visible_status for post in posts)
+def parse_numeric_source_ids(posts: list[Any]) -> list[int]:
+    """Validate that mapped source IDs form a strictly increasing batch."""
+    try:
+        source_ids = [int(post.source_id) for post in posts]
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "MySQL source IDs must be integer-compatible."
+        ) from exc
 
-    print("========== MySQL batch ==========")
-    print("requested limit:", limit)
+    if len(set(source_ids)) != len(source_ids):
+        raise RuntimeError(
+            "Duplicate source IDs were found in the MySQL batch."
+        )
+
+    if any(
+        current_id <= previous_id
+        for previous_id, current_id in zip(
+            source_ids,
+            source_ids[1:],
+        )
+    ):
+        raise RuntimeError(
+            "MySQL source IDs were not strictly increasing."
+        )
+
+    return source_ids
+
+
+async def synchronize(
+    *,
+    batch_size: int,
+    after_id: int,
+    max_rows: int | None,
+) -> dict[str, Any]:
+    """Read and upsert one or more deterministic MySQL batches."""
+    validate_sync_parameters(
+        batch_size=batch_size,
+        after_id=after_id,
+        max_rows=max_rows,
+    )
+
+    started_at = time.monotonic()
+    cursor_id = after_id
+
+    batch_count = 0
+    total_loaded = 0
+    total_upserted = 0
+
+    category_counts: Counter[str] = Counter()
+    status_counts: Counter[str | None] = Counter()
+
+    source_exhausted = False
+
+    print("========== Synchronization configuration ==========")
+    print("batch_size:", batch_size)
     print("after_id:", after_id)
-    print("loaded rows:", len(raw_rows))
-    print("mapped posts:", len(posts))
-    print("first source_id:", posts[0].source_id)
-    print("last source_id:", posts[-1].source_id)
-    print("categories:", dict(category_counts))
-    print("visible statuses:", dict(status_counts))
+    print(
+        "max_rows:",
+        "all available rows" if max_rows is None else max_rows,
+    )
 
-    affected = await post_repository.upsert_many(posts)
+    while max_rows is None or total_loaded < max_rows:
+        if max_rows is None:
+            current_limit = batch_size
+        else:
+            current_limit = min(
+                batch_size,
+                max_rows - total_loaded,
+            )
 
-    print("\n========== PostgreSQL write ==========")
-    print("upserted rows:", affected)
+        raw_rows = read_mysql_posts(
+            limit=current_limit,
+            after_id=cursor_id,
+        )
+
+        if not raw_rows:
+            source_exhausted = True
+            break
+
+        if len(raw_rows) > current_limit:
+            raise RuntimeError(
+                "MySQL returned more rows than the requested batch limit."
+            )
+
+        posts = [map_mysql_post_row(row) for row in raw_rows]
+        source_ids = parse_numeric_source_ids(posts)
+
+        first_source_id = source_ids[0]
+        last_source_id = source_ids[-1]
+
+        if first_source_id <= cursor_id:
+            raise RuntimeError(
+                "MySQL cursor did not advance beyond after_id."
+            )
+
+        affected = await post_repository.upsert_many(posts)
+
+        if affected != len(posts):
+            raise RuntimeError(
+                "PostgreSQL upsert count did not match mapped post count."
+            )
+
+        batch_count += 1
+        total_loaded += len(raw_rows)
+        total_upserted += affected
+        cursor_id = last_source_id
+
+        category_counts.update(
+            post.category for post in posts
+        )
+        status_counts.update(
+            post.visible_status for post in posts
+        )
+
+        elapsed_seconds = time.monotonic() - started_at
+
+        print(f"\n========== Batch {batch_count} ==========")
+        print("requested rows:", current_limit)
+        print("loaded rows:", len(raw_rows))
+        print("first source_id:", first_source_id)
+        print("last source_id:", last_source_id)
+        print("upserted rows:", affected)
+        print("total loaded:", total_loaded)
+        print("total upserted:", total_upserted)
+        print("elapsed seconds:", round(elapsed_seconds, 3))
+
+        if len(raw_rows) < current_limit:
+            source_exhausted = True
+            break
 
     summary = await read_postgres_summary()
 
-    print("\n========== PostgreSQL summary ==========")
-    for key, value in summary.items():
-        print(f"{key}: {value}")
-
-    if int(summary["row_count"]) != int(summary["distinct_source_ids"]):
+    if int(summary["row_count"]) != int(
+        summary["distinct_source_ids"]
+    ):
         raise RuntimeError(
             "PostgreSQL row count and distinct source ID count differ."
         )
 
+    stopped_by_max_rows = (
+        max_rows is not None
+        and total_loaded >= max_rows
+        and not source_exhausted
+    )
+
+    result = {
+        "batch_count": batch_count,
+        "loaded_rows": total_loaded,
+        "upserted_rows": total_upserted,
+        "initial_after_id": after_id,
+        "last_source_id": cursor_id,
+        "source_exhausted": source_exhausted,
+        "stopped_by_max_rows": stopped_by_max_rows,
+        "categories_in_run": dict(category_counts),
+        "visible_statuses_in_run": dict(status_counts),
+        "elapsed_seconds": round(
+            time.monotonic() - started_at,
+            3,
+        ),
+        "postgres_summary": summary,
+    }
+
+    print("\n========== Synchronization result ==========")
+    for key, value in result.items():
+        print(f"{key}: {value}")
+
+    return result
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Synchronize one MySQL post batch into PostgreSQL."
+        description=(
+            "Synchronize deterministic MySQL post batches "
+            "into PostgreSQL."
+        )
     )
+
     parser.add_argument(
-        "--limit",
+        "--batch-size",
         type=int,
-        default=1000,
-        help="Maximum rows to synchronize.",
+        default=DEFAULT_BATCH_SIZE,
+        help=(
+            "Rows read and committed per batch. "
+            f"Default: {DEFAULT_BATCH_SIZE}."
+        ),
     )
+
     parser.add_argument(
         "--after-id",
         type=int,
         default=0,
-        help="Only synchronize MySQL rows with id greater than this value.",
+        help=(
+            "Only synchronize MySQL rows with id greater "
+            "than this value."
+        ),
+    )
+
+    scope_group = parser.add_mutually_exclusive_group()
+
+    scope_group.add_argument(
+        "--all",
+        action="store_true",
+        help="Continue until no more MySQL rows are available.",
+    )
+
+    scope_group.add_argument(
+        "--max-rows",
+        "--limit",
+        dest="max_rows",
+        type=int,
+        default=None,
+        help=(
+            "Maximum total rows synchronized in this run. "
+            "--limit is retained for backward compatibility."
+        ),
     )
 
     args = parser.parse_args()
 
-    if not 1 <= args.limit <= 10000:
-        parser.error("--limit must be between 1 and 10000.")
+    if args.all:
+        args.max_rows = None
+    elif args.max_rows is None:
+        args.max_rows = DEFAULT_MAX_ROWS
 
-    if args.after_id < 0:
-        parser.error("--after-id cannot be negative.")
+    try:
+        validate_sync_parameters(
+            batch_size=args.batch_size,
+            after_id=args.after_id,
+            max_rows=args.max_rows,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
 
     return args
 
 
 def main() -> None:
     args = parse_args()
+
     asyncio.run(
         synchronize(
-            limit=args.limit,
+            batch_size=args.batch_size,
             after_id=args.after_id,
+            max_rows=args.max_rows,
         )
     )
 
