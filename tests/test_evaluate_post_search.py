@@ -304,3 +304,96 @@ def test_forced_degradation_summary() -> None:
     ] == 1.0
     assert summary["request_success_rate"] == 1.0
     assert summary["geo_range_hit_rate"] == 1.0
+
+
+def test_binary_relevance_threshold_defaults_to_one() -> None:
+    case = evaluation.EvaluationCase(
+        case_id="default-threshold",
+        query="默认阈值",
+        should_return_results=True,
+        relevance={
+            "weak": 1,
+        },
+    )
+
+    assert case.binary_relevance_threshold == 1
+
+
+def test_binary_metrics_respect_relevance_threshold() -> None:
+    returned = [
+        "weak",
+        "strong",
+    ]
+    relevance = {
+        "weak": 1,
+        "strong": 2,
+        "best": 3,
+    }
+
+    assert evaluation.precision_at_k(
+        returned,
+        relevance,
+        2,
+        2,
+    ) == 0.5
+
+    assert evaluation.recall_at_k(
+        returned,
+        relevance,
+        2,
+        2,
+    ) == 0.5
+
+    assert evaluation.reciprocal_rank_at_k(
+        returned,
+        relevance,
+        2,
+        2,
+    ) == 0.5
+
+
+def test_grade_one_still_participates_in_ndcg() -> None:
+    relevance = {
+        "weak": 1,
+        "strong": 2,
+    }
+
+    score = evaluation.ndcg_at_k(
+        ["weak", "strong"],
+        relevance,
+        2,
+    )
+
+    assert score is not None
+    assert 0 < score < 1
+
+
+def test_positive_case_requires_grade_meeting_threshold() -> None:
+    with pytest.raises(
+        ValueError,
+        match="binary_relevance_threshold",
+    ):
+        evaluation.EvaluationCase(
+            case_id="insufficient-grade",
+            query="只有弱相关",
+            should_return_results=True,
+            binary_relevance_threshold=2,
+            relevance={
+                "weak": 1,
+            },
+        )
+
+
+def test_positive_case_accepts_grade_meeting_threshold() -> None:
+    case = evaluation.EvaluationCase(
+        case_id="sufficient-grade",
+        query="存在有效相关",
+        should_return_results=True,
+        binary_relevance_threshold=2,
+        relevance={
+            "weak": 1,
+            "strong": 2,
+        },
+    )
+
+    assert case.binary_relevance_threshold == 2

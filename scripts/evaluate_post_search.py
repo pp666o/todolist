@@ -60,6 +60,11 @@ class EvaluationCase(BaseModel):
 
     should_return_results: bool
     relevance: dict[str, int] = Field(default_factory=dict)
+    binary_relevance_threshold: int = Field(
+        default=1,
+        ge=1,
+        le=3,
+    )
     notes: str | None = None
 
     @field_validator("case_id", "query")
@@ -143,20 +148,27 @@ class EvaluationCase(BaseModel):
                 "radius_km requires latitude and longitude"
             )
 
+        binary_positive_judgments = [
+            grade
+            for grade in self.relevance.values()
+            if grade >= self.binary_relevance_threshold
+        ]
+
+        if (
+            self.should_return_results
+            and not binary_positive_judgments
+        ):
+            raise ValueError(
+                "a positive case requires at least one "
+                "relevance grade greater than or equal to "
+                "binary_relevance_threshold"
+            )
+
         positive_judgments = [
             grade
             for grade in self.relevance.values()
             if grade > 0
         ]
-
-        if (
-            self.should_return_results
-            and not positive_judgments
-        ):
-            raise ValueError(
-                "a positive case requires at least one "
-                "relevance grade greater than zero"
-            )
 
         if (
             not self.should_return_results
@@ -240,12 +252,13 @@ def load_cases(path: Path) -> list[EvaluationCase]:
 
 def relevant_source_ids(
     relevance: dict[str, int],
+    binary_relevance_threshold: int = 1,
 ) -> set[str]:
-    """Return source IDs with positive human relevance."""
+    """Return source IDs meeting the binary relevance threshold."""
     return {
         source_id
         for source_id, grade in relevance.items()
-        if grade > 0
+        if grade >= binary_relevance_threshold
     }
 
 
@@ -253,9 +266,13 @@ def precision_at_k(
     returned_source_ids: Sequence[str],
     relevance: dict[str, int],
     k: int,
+    binary_relevance_threshold: int = 1,
 ) -> float | None:
     """Calculate binary Precision@K."""
-    relevant = relevant_source_ids(relevance)
+    relevant = relevant_source_ids(
+        relevance,
+        binary_relevance_threshold,
+    )
 
     if not relevant:
         return None
@@ -272,9 +289,13 @@ def recall_at_k(
     returned_source_ids: Sequence[str],
     relevance: dict[str, int],
     k: int,
+    binary_relevance_threshold: int = 1,
 ) -> float | None:
     """Calculate binary Recall@K."""
-    relevant = relevant_source_ids(relevance)
+    relevant = relevant_source_ids(
+        relevance,
+        binary_relevance_threshold,
+    )
 
     if not relevant:
         return None
@@ -290,9 +311,13 @@ def reciprocal_rank_at_k(
     returned_source_ids: Sequence[str],
     relevance: dict[str, int],
     k: int,
+    binary_relevance_threshold: int = 1,
 ) -> float | None:
-    """Calculate reciprocal rank of the first relevant item."""
-    relevant = relevant_source_ids(relevance)
+    """Calculate reciprocal rank of the first binary-relevant item."""
+    relevant = relevant_source_ids(
+        relevance,
+        binary_relevance_threshold,
+    )
 
     if not relevant:
         return None
@@ -468,7 +493,7 @@ async def evaluate_case(
             else None
         )
         for source_id, grade in case.relevance.items()
-        if grade > 0
+        if grade >= case.binary_relevance_threshold
     }
 
     geo_hits = 0
@@ -492,6 +517,9 @@ async def evaluate_case(
     return {
         "case_id": case.case_id,
         "query": case.query,
+        "binary_relevance_threshold": (
+            case.binary_relevance_threshold
+        ),
         "success": True,
         "should_return_results": (
             case.should_return_results
@@ -510,6 +538,7 @@ async def evaluate_case(
                 returned_source_ids,
                 case.relevance,
                 case.top_k,
+                case.binary_relevance_threshold,
             )
         ),
         "recall_at_k": round_optional(
@@ -517,6 +546,7 @@ async def evaluate_case(
                 returned_source_ids,
                 case.relevance,
                 case.top_k,
+                case.binary_relevance_threshold,
             )
         ),
         "mrr_at_k": round_optional(
@@ -524,6 +554,7 @@ async def evaluate_case(
                 returned_source_ids,
                 case.relevance,
                 case.top_k,
+                case.binary_relevance_threshold,
             )
         ),
         "ndcg_at_k": round_optional(
