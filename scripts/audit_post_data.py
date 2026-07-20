@@ -35,6 +35,30 @@ QUALITY_COUNTERS = (
     "negative_dislikes_count",
 )
 
+COVERAGE_COUNTERS = (
+    "coordinate_count",
+    "distinct_country_count",
+    "distinct_province_count",
+    "distinct_city_count",
+    "distinct_district_count",
+    "distinct_city_district_count",
+    "empty_address_count",
+    "missing_created_at_count",
+    "missing_updated_at_count",
+    "updated_before_created_count",
+)
+
+COMPARABLE_COVERAGE_COUNTERS = (
+    "coordinate_count",
+    "distinct_country_count",
+    "distinct_province_count",
+    "distinct_city_count",
+    "distinct_district_count",
+    "distinct_city_district_count",
+    "empty_address_count",
+    "missing_created_at_count",
+)
+
 
 def _as_int(value: Any) -> int:
     """Convert SQL count values into plain integers."""
@@ -177,6 +201,90 @@ def read_mysql_snapshot(
             cursor.execute(
                 f"""
                 SELECT
+                    SUM(
+                        from_lat IS NOT NULL
+                        AND from_lng IS NOT NULL
+                    ) AS coordinate_count,
+
+                    COUNT(
+                        DISTINCT NULLIF(
+                            TRIM(CAST(country AS CHAR)),
+                            ''
+                        )
+                    ) AS distinct_country_count,
+
+                    COUNT(
+                        DISTINCT NULLIF(
+                            TRIM(CAST(province AS CHAR)),
+                            ''
+                        )
+                    ) AS distinct_province_count,
+
+                    COUNT(
+                        DISTINCT NULLIF(
+                            TRIM(CAST(city AS CHAR)),
+                            ''
+                        )
+                    ) AS distinct_city_count,
+
+                    COUNT(
+                        DISTINCT NULLIF(
+                            TRIM(CAST(district AS CHAR)),
+                            ''
+                        )
+                    ) AS distinct_district_count,
+
+                    COUNT(
+                        DISTINCT CASE
+                            WHEN city IS NOT NULL
+                             AND CHAR_LENGTH(
+                                 TRIM(CAST(city AS CHAR))
+                             ) > 0
+                             AND district IS NOT NULL
+                             AND CHAR_LENGTH(
+                                 TRIM(CAST(district AS CHAR))
+                             ) > 0
+                            THEN CONCAT(
+                                TRIM(CAST(city AS CHAR)),
+                                CHAR(31),
+                                TRIM(CAST(district AS CHAR))
+                            )
+                        END
+                    ) AS distinct_city_district_count,
+
+                    SUM(
+                        address IS NULL
+                        OR CHAR_LENGTH(
+                            TRIM(CAST(address AS CHAR))
+                        ) = 0
+                    ) AS empty_address_count,
+
+                    SUM(
+                        createtime IS NULL
+                    ) AS missing_created_at_count,
+
+                    SUM(
+                        updatetime IS NULL
+                    ) AS missing_updated_at_count,
+
+                    SUM(
+                        createtime IS NOT NULL
+                        AND updatetime IS NOT NULL
+                        AND updatetime < createtime
+                    ) AS updated_before_created_count
+                FROM {table}
+                """
+            )
+            coverage = cursor.fetchone()
+
+            if coverage is None:
+                raise RuntimeError(
+                    "MySQL coverage audit query returned no result."
+                )
+
+            cursor.execute(
+                f"""
+                SELECT
                     typecategory,
                     COUNT(*) AS row_count
                 FROM {table}
@@ -280,6 +388,10 @@ def read_mysql_snapshot(
             key: _as_int(quality[key])
             for key in QUALITY_COUNTERS
         },
+        "coverage": {
+            key: _as_int(coverage[key])
+            for key in COVERAGE_COUNTERS
+        },
         "categories": categories,
         "visible_statuses": visible_statuses,
         "source_ids": source_ids,
@@ -305,7 +417,11 @@ async def read_postgres_snapshot(
                     ) AS embedded_count,
                     COUNT(*) FILTER (
                         WHERE source_id !~ '^[0-9]+$'
-                    ) AS non_numeric_source_id_count
+                    ) AS non_numeric_source_id_count,
+                    MIN(created_at) AS min_created_at,
+                    MAX(created_at) AS max_created_at,
+                    MIN(updated_at) AS min_updated_at,
+                    MAX(updated_at) AS max_updated_at
                 FROM posts
                 WHERE source = %s
                 """,
@@ -413,6 +529,72 @@ async def read_postgres_snapshot(
             await cursor.execute(
                 """
                 SELECT
+                    COUNT(*) FILTER (
+                        WHERE latitude IS NOT NULL
+                          AND longitude IS NOT NULL
+                    ) AS coordinate_count,
+
+                    COUNT(
+                        DISTINCT NULLIF(btrim(country), '')
+                    ) AS distinct_country_count,
+
+                    COUNT(
+                        DISTINCT NULLIF(btrim(province), '')
+                    ) AS distinct_province_count,
+
+                    COUNT(
+                        DISTINCT NULLIF(btrim(city), '')
+                    ) AS distinct_city_count,
+
+                    COUNT(
+                        DISTINCT NULLIF(btrim(district), '')
+                    ) AS distinct_district_count,
+
+                    COUNT(
+                        DISTINCT (
+                            btrim(city),
+                            btrim(district)
+                        )
+                    ) FILTER (
+                        WHERE city IS NOT NULL
+                          AND btrim(city) <> ''
+                          AND district IS NOT NULL
+                          AND btrim(district) <> ''
+                    ) AS distinct_city_district_count,
+
+                    COUNT(*) FILTER (
+                        WHERE address IS NULL
+                           OR btrim(address) = ''
+                    ) AS empty_address_count,
+
+                    COUNT(*) FILTER (
+                        WHERE created_at IS NULL
+                    ) AS missing_created_at_count,
+
+                    COUNT(*) FILTER (
+                        WHERE updated_at IS NULL
+                    ) AS missing_updated_at_count,
+
+                    COUNT(*) FILTER (
+                        WHERE created_at IS NOT NULL
+                          AND updated_at IS NOT NULL
+                          AND updated_at < created_at
+                    ) AS updated_before_created_count
+                FROM posts
+                WHERE source = %s
+                """,
+                (MYSQL_POST_SOURCE,),
+            )
+            coverage = await cursor.fetchone()
+
+            if coverage is None:
+                raise RuntimeError(
+                    "PostgreSQL coverage audit query returned no result."
+                )
+
+            await cursor.execute(
+                """
+                SELECT
                     category,
                     COUNT(*) AS row_count
                 FROM posts
@@ -513,9 +695,17 @@ async def read_postgres_snapshot(
         "non_numeric_source_id_count": _as_int(
             overall["non_numeric_source_id_count"]
         ),
+        "min_created_at": overall["min_created_at"],
+        "max_created_at": overall["max_created_at"],
+        "min_updated_at": overall["min_updated_at"],
+        "max_updated_at": overall["max_updated_at"],
         "quality": {
             key: _as_int(quality[key])
             for key in QUALITY_COUNTERS
+        },
+        "coverage": {
+            key: _as_int(coverage[key])
+            for key in COVERAGE_COUNTERS
         },
         "categories": categories,
         "visible_statuses": visible_statuses,
@@ -601,6 +791,64 @@ def evaluate_audit(
                     f"{side_name} {counter_name}={count}."
                 )
 
+    for counter_name in COMPARABLE_COVERAGE_COUNTERS:
+        mysql_value = int(
+            mysql_snapshot["coverage"][counter_name]
+        )
+        postgres_value = int(
+            postgres_snapshot["coverage"][counter_name]
+        )
+
+        if mysql_value != postgres_value:
+            errors.append(
+                "MySQL/PostgreSQL coverage differs for "
+                f"{counter_name}: "
+                f"mysql={mysql_value}, "
+                f"postgres={postgres_value}."
+            )
+
+    postgres_invalid_times = int(
+        postgres_snapshot["coverage"][
+            "updated_before_created_count"
+        ]
+    )
+
+    if postgres_invalid_times:
+        errors.append(
+            "PostgreSQL contains updated_at values earlier "
+            f"than created_at: count={postgres_invalid_times}."
+        )
+
+    mysql_invalid_times = int(
+        mysql_snapshot["coverage"][
+            "updated_before_created_count"
+        ]
+    )
+
+    if mysql_invalid_times:
+        warnings.append(
+            "MySQL contains updatetime values earlier than "
+            f"createtime: count={mysql_invalid_times}; "
+            "the mapper normalizes these rows in PostgreSQL."
+        )
+
+    mysql_missing_updates = int(
+        mysql_snapshot["coverage"]["missing_updated_at_count"]
+    )
+    postgres_missing_updates = int(
+        postgres_snapshot["coverage"][
+            "missing_updated_at_count"
+        ]
+    )
+
+    if mysql_missing_updates != postgres_missing_updates:
+        warnings.append(
+            "MySQL/PostgreSQL missing updated-time counts differ: "
+            f"mysql={mysql_missing_updates}, "
+            f"postgres={postgres_missing_updates}; "
+            "the mapper may fill missing updated_at from created_at."
+        )
+
     mysql_ids = set(mysql_snapshot["source_ids"])
     postgres_ids = set(postgres_snapshot["source_ids"])
 
@@ -655,6 +903,19 @@ def print_snapshot_summary(
         "visible_statuses:",
         mysql_snapshot["visible_statuses"],
     )
+    print(
+        "created_at range:",
+        mysql_snapshot["min_created_at"],
+        "->",
+        mysql_snapshot["max_created_at"],
+    )
+    print(
+        "updated_at range:",
+        mysql_snapshot["min_updated_at"],
+        "->",
+        mysql_snapshot["max_updated_at"],
+    )
+    print("coverage:", mysql_snapshot["coverage"])
     print("quality:", mysql_snapshot["quality"])
 
     print("\n========== PostgreSQL target ==========")
@@ -674,6 +935,19 @@ def print_snapshot_summary(
         "visible_statuses:",
         postgres_snapshot["visible_statuses"],
     )
+    print(
+        "created_at range:",
+        postgres_snapshot["min_created_at"],
+        "->",
+        postgres_snapshot["max_created_at"],
+    )
+    print(
+        "updated_at range:",
+        postgres_snapshot["min_updated_at"],
+        "->",
+        postgres_snapshot["max_updated_at"],
+    )
+    print("coverage:", postgres_snapshot["coverage"])
     print("quality:", postgres_snapshot["quality"])
 
 
