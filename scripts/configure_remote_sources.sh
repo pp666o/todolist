@@ -1,80 +1,182 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -Eeuo pipefail
 
-PROJECT_ROOT="/workspace"
-ENV_FILE="${PROJECT_ROOT}/.env"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENV_FILE="${ROOT_DIR}/.env"
+PERSIST_ENV="${HOME}/.config/geo-post-search/env"
+PYTHON_BIN="${ROOT_DIR}/.venv/bin/python"
 
-MYSQL_INTERNAL_HOST="172.17.0.12"
-MYSQL_INTERNAL_PORT="3306"
+[[ -x "${PYTHON_BIN}" ]] || {
+  echo "ERROR: Python environment is not ready: ${PYTHON_BIN}" >&2
+  exit 1
+}
 
-MYSQL_PUBLIC_HOST="sh-cdb-im8up7xq.sql.tencentcdb.com"
-MYSQL_PUBLIC_PORT="63944"
+cd "${ROOT_DIR}"
 
-MYSQL_USER="root"
-MYSQL_DATABASE="db.transform.ss"
-MYSQL_TABLE="tiezi_geo_new"
-
-REDIS_HOST="127.0.0.1"
-REDIS_PORT="16379"
-
-cd "$PROJECT_ROOT"
-
-if [ ! -f "$ENV_FILE" ]; then
-    touch "$ENV_FILE"
-    chmod 600 "$ENV_FILE"
-fi
-
-read -rs -p "请输入 MySQL 密码: " MYSQL_PASSWORD
-echo
-
-if [ -z "$MYSQL_PASSWORD" ]; then
-    echo "MySQL 密码不能为空"
-    exit 1
-fi
-
-export \
-    MYSQL_INTERNAL_HOST \
-    MYSQL_INTERNAL_PORT \
-    MYSQL_PUBLIC_HOST \
-    MYSQL_PUBLIC_PORT \
-    MYSQL_USER \
-    MYSQL_PASSWORD \
-    MYSQL_DATABASE \
-    MYSQL_TABLE \
-    REDIS_HOST \
-    REDIS_PORT
-
-echo "========== 检测 MySQL 地址 =========="
-
-MYSQL_RESULT="$(
-.venv/bin/python - <<'PY'
+exec "${PYTHON_BIN}" - "${ENV_FILE}" "${PERSIST_ENV}" <<'PY'
+import getpass
+import json
 import os
+import secrets
+import subprocess
+import sys
+from pathlib import Path
+
 import pymysql
 
+
+env_path = Path(sys.argv[1])
+persistent_path = Path(sys.argv[2])
+
+
+def read_env(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+
+    if not path.exists():
+        return values
+
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+
+        if (
+            len(value) >= 2
+            and value[0] == value[-1]
+            and value[0] in {"'", '"'}
+        ):
+            value = value[1:-1]
+
+        values[key] = value
+
+    return values
+
+
+def is_valid(value: str | None) -> bool:
+    if value is None or not value.strip():
+        return False
+
+    placeholders = (
+        "replace_with",
+        "your-server",
+        "这里填写",
+        "placeholder",
+    )
+
+    lowered = value.lower()
+
+    return not any(marker.lower() in lowered for marker in placeholders)
+
+
+def first_valid(*values: str | None) -> str | None:
+    for value in values:
+        if is_valid(value):
+            return value
+
+    return None
+
+
+current = read_env(env_path)
+persistent = read_env(persistent_path)
+
+postgres_password = first_valid(
+    os.getenv("POSTGRES_PASSWORD"),
+    current.get("POSTGRES_PASSWORD"),
+    persistent.get("POSTGRES_PASSWORD"),
+)
+
+if postgres_password is None:
+    try:
+        output = subprocess.check_output(
+            [
+                "docker",
+                "inspect",
+                "geo-postgres",
+                "--format",
+                "{{range .Config.Env}}{{println .}}{{end}}",
+            ],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+
+        for line in output.splitlines():
+            if line.startswith("POSTGRES_PASSWORD="):
+                candidate = line.split("=", 1)[1]
+
+                if is_valid(candidate):
+                    postgres_password = candidate
+                    break
+
+    except (OSError, subprocess.CalledProcessError):
+        pass
+
+if postgres_password is None:
+    postgres_password = secrets.token_urlsafe(32)
+    print("[INFO] 为新的 PostgreSQL 环境生成随机密码")
+else:
+    print("[OK] 已复用 PostgreSQL 密码")
+
+
+mysql_password = first_valid(
+    os.getenv("MYSQL_SOURCE_PASSWORD"),
+    current.get("MYSQL_SOURCE_PASSWORD"),
+    persistent.get("MYSQL_SOURCE_PASSWORD"),
+)
+
+if mysql_password is None:
+    mysql_password = getpass.getpass(
+        "请输入 MySQL 密码（仅首次配置需要）: "
+    ).strip()
+
+if not mysql_password:
+    raise SystemExit("ERROR: MySQL 密码不能为空")
+
+
+mysql_user = first_valid(
+    os.getenv("MYSQL_SOURCE_USER"),
+    current.get("MYSQL_SOURCE_USER"),
+    persistent.get("MYSQL_SOURCE_USER"),
+) or "root"
+
+mysql_database = first_valid(
+    os.getenv("MYSQL_SOURCE_DATABASE"),
+    current.get("MYSQL_SOURCE_DATABASE"),
+    persistent.get("MYSQL_SOURCE_DATABASE"),
+) or "db.transform.ss"
+
+mysql_table = first_valid(
+    os.getenv("MYSQL_SOURCE_TABLE"),
+    current.get("MYSQL_SOURCE_TABLE"),
+    persistent.get("MYSQL_SOURCE_TABLE"),
+) or "tiezi_geo_new"
+
+
 targets = [
-    (
-        "internal",
-        os.environ["MYSQL_INTERNAL_HOST"],
-        int(os.environ["MYSQL_INTERNAL_PORT"]),
-    ),
-    (
-        "public",
-        os.environ["MYSQL_PUBLIC_HOST"],
-        int(os.environ["MYSQL_PUBLIC_PORT"]),
-    ),
+    ("internal", "172.17.0.12", 3306),
+    ("public", "sh-cdb-im8up7xq.sql.tencentcdb.com", 63944),
 ]
 
-for name, host, port in targets:
-    print(f"测试 {name}: {host}:{port}", flush=True)
+selected_target: tuple[str, str, int] | None = None
+errors: list[str] = []
+
+print("========== 检测 MySQL 地址 ==========")
+
+for mode, host, port in targets:
+    print(f"测试 {mode}: {host}:{port}", flush=True)
 
     try:
         connection = pymysql.connect(
             host=host,
             port=port,
-            user=os.environ["MYSQL_USER"],
-            password=os.environ["MYSQL_PASSWORD"],
-            database=os.environ["MYSQL_DATABASE"],
+            user=mysql_user,
+            password=mysql_password,
+            database=mysql_database,
             charset="utf8mb4",
             connect_timeout=6,
             read_timeout=10,
@@ -83,181 +185,200 @@ for name, host, port in targets:
 
         with connection.cursor() as cursor:
             cursor.execute("SELECT DATABASE(), VERSION()")
-            database, version = cursor.fetchone()
+            database_name, mysql_version = cursor.fetchone()
 
         connection.close()
 
-        print(f"SUCCESS|{name}|{host}|{port}|{database}|{version}")
+        print(
+            f"[OK] database={database_name}, "
+            f"version={mysql_version}"
+        )
+
+        selected_target = (mode, host, port)
         break
 
     except Exception as exc:
-        print(f"失败: {type(exc).__name__}: {exc}", flush=True)
-else:
-    raise SystemExit("两个 MySQL 地址均无法连接")
-PY
-)"
+        error = f"{mode}: {type(exc).__name__}: {exc}"
+        errors.append(error)
+        print(f"[WARN] {error}", flush=True)
 
-echo "$MYSQL_RESULT"
+if selected_target is None:
+    raise SystemExit(
+        "ERROR: MySQL 内网和公网地址均无法连接："
+        + " | ".join(errors)
+    )
 
-SUCCESS_LINE="$(printf '%s\n' "$MYSQL_RESULT" | grep '^SUCCESS|' | tail -1)"
+mysql_mode, mysql_host, mysql_port = selected_target
 
-MYSQL_MODE="$(printf '%s' "$SUCCESS_LINE" | cut -d'|' -f2)"
-MYSQL_HOST="$(printf '%s' "$SUCCESS_LINE" | cut -d'|' -f3)"
-MYSQL_PORT="$(printf '%s' "$SUCCESS_LINE" | cut -d'|' -f4)"
+print(
+    f"[OK] 最终使用 MySQL {mysql_mode}: "
+    f"{mysql_host}:{mysql_port}"
+)
 
-export MYSQL_HOST MYSQL_PORT
 
-echo
-echo "最终使用 MySQL ${MYSQL_MODE}: ${MYSQL_HOST}:${MYSQL_PORT}"
+redis_ssh_host = first_valid(
+    os.getenv("REDIS_SSH_HOST"),
+    current.get("REDIS_SSH_HOST"),
+    persistent.get("REDIS_SSH_HOST"),
+) or "101.43.72.189"
 
-echo "========== 检测 Redis =========="
+redis_ssh_user = first_valid(
+    os.getenv("REDIS_SSH_USER"),
+    current.get("REDIS_SSH_USER"),
+    persistent.get("REDIS_SSH_USER"),
+) or "ubuntu"
 
-.venv/bin/python - <<'PY'
-import os
-import socket
+redis_password = (
+    os.getenv("REDIS_PASSWORD")
+    if os.getenv("REDIS_PASSWORD") is not None
+    else current.get(
+        "REDIS_PASSWORD",
+        persistent.get("REDIS_PASSWORD", ""),
+    )
+)
 
-host = os.environ["REDIS_HOST"]
-port = int(os.environ["REDIS_PORT"])
 
-with socket.create_connection((host, port), timeout=5) as sock:
-    sock.sendall(b"*1\r\n$4\r\nPING\r\n")
-    response = sock.recv(1024).decode("utf-8", errors="replace").strip()
+settings = {
+    "POSTGRES_DB": "geo_posts",
+    "POSTGRES_USER": "geo_posts",
+    "POSTGRES_PASSWORD": postgres_password,
+    "POSTGRES_HOST": "127.0.0.1",
+    "POSTGRES_PORT": "5432",
 
-print(f"Redis {host}:{port} 响应: {response}")
+    "MYSQL_SOURCE_HOST": mysql_host,
+    "MYSQL_SOURCE_PORT": str(mysql_port),
+    "MYSQL_SOURCE_USER": mysql_user,
+    "MYSQL_SOURCE_PASSWORD": mysql_password,
+    "MYSQL_SOURCE_DATABASE": mysql_database,
+    "MYSQL_SOURCE_TABLE": mysql_table,
+    "MYSQL_SOURCE_CHARSET": "utf8mb4",
 
-if not response:
-    raise SystemExit("Redis 没有返回响应")
-PY
+    "REDIS_HOST": "127.0.0.1",
+    "REDIS_PORT": "16379",
+    "REDIS_DB": "0",
+    "REDIS_PASSWORD": redis_password or "",
+    "REDIS_SOCKET_TIMEOUT_SECONDS": "3",
 
-echo "========== 写入唯一配置 =========="
+    "REDIS_SSH_HOST": redis_ssh_host,
+    "REDIS_SSH_USER": redis_ssh_user,
+    "REDIS_REMOTE_HOST": "127.0.0.1",
+    "REDIS_REMOTE_PORT": "6379",
 
-.venv/bin/python - <<'PY'
-import json
-import os
-from pathlib import Path
+    "POST_BOOTSTRAP_LIMIT": "1000",
+}
 
-env_path = Path("/workspace/.env")
-existing_lines = env_path.read_text(encoding="utf-8").splitlines()
 
 managed_prefixes = (
+    "POSTGRES_",
     "MYSQL_SOURCE_",
     "REDIS_",
 )
 
-kept_lines = []
-
-for line in existing_lines:
-    stripped = line.strip()
-
-    if any(stripped.startswith(prefix) for prefix in managed_prefixes):
-        continue
-
-    kept_lines.append(line)
-
-settings = {
-    "MYSQL_SOURCE_HOST": os.environ["MYSQL_HOST"],
-    "MYSQL_SOURCE_PORT": os.environ["MYSQL_PORT"],
-    "MYSQL_SOURCE_USER": os.environ["MYSQL_USER"],
-    "MYSQL_SOURCE_PASSWORD": os.environ["MYSQL_PASSWORD"],
-    "MYSQL_SOURCE_DATABASE": os.environ["MYSQL_DATABASE"],
-    "MYSQL_SOURCE_TABLE": os.environ["MYSQL_TABLE"],
-    "MYSQL_SOURCE_CHARSET": "utf8mb4",
-
-    "REDIS_HOST": os.environ["REDIS_HOST"],
-    "REDIS_PORT": os.environ["REDIS_PORT"],
+managed_keys = {
+    "POST_BOOTSTRAP_LIMIT",
 }
 
-kept_lines.extend([
-    "",
-    "# Remote MySQL post source",
-])
+kept_lines: list[str] = []
 
-for key in (
-    "MYSQL_SOURCE_HOST",
-    "MYSQL_SOURCE_PORT",
-    "MYSQL_SOURCE_USER",
-    "MYSQL_SOURCE_PASSWORD",
-    "MYSQL_SOURCE_DATABASE",
-    "MYSQL_SOURCE_TABLE",
-    "MYSQL_SOURCE_CHARSET",
-):
-    kept_lines.append(
-        f"{key}={json.dumps(settings[key], ensure_ascii=False)}"
-    )
+if env_path.exists():
+    for raw_line in env_path.read_text(
+        encoding="utf-8"
+    ).splitlines():
+        stripped = raw_line.strip()
 
-kept_lines.extend([
-    "",
-    "# Remote Redis realtime feature service",
-    f"REDIS_HOST={json.dumps(settings['REDIS_HOST'])}",
-    f"REDIS_PORT={json.dumps(settings['REDIS_PORT'])}",
-])
+        if (
+            stripped
+            and not stripped.startswith("#")
+            and "=" in stripped
+        ):
+            key = stripped.split("=", 1)[0].strip()
 
-env_path.write_text(
-    "\n".join(kept_lines).rstrip() + "\n",
-    encoding="utf-8",
-)
+            if (
+                key.startswith(managed_prefixes)
+                or key in managed_keys
+            ):
+                continue
+
+        kept_lines.append(raw_line)
+
+while kept_lines and not kept_lines[-1].strip():
+    kept_lines.pop()
+
+
+sections = [
+    (
+        "PostgreSQL / pgvector",
+        (
+            "POSTGRES_DB",
+            "POSTGRES_USER",
+            "POSTGRES_PASSWORD",
+            "POSTGRES_HOST",
+            "POSTGRES_PORT",
+        ),
+    ),
+    (
+        "Remote MySQL post source",
+        (
+            "MYSQL_SOURCE_HOST",
+            "MYSQL_SOURCE_PORT",
+            "MYSQL_SOURCE_USER",
+            "MYSQL_SOURCE_PASSWORD",
+            "MYSQL_SOURCE_DATABASE",
+            "MYSQL_SOURCE_TABLE",
+            "MYSQL_SOURCE_CHARSET",
+        ),
+    ),
+    (
+        "Redis realtime feature service",
+        (
+            "REDIS_HOST",
+            "REDIS_PORT",
+            "REDIS_DB",
+            "REDIS_PASSWORD",
+            "REDIS_SOCKET_TIMEOUT_SECONDS",
+        ),
+    ),
+    (
+        "Redis SSH tunnel",
+        (
+            "REDIS_SSH_HOST",
+            "REDIS_SSH_USER",
+            "REDIS_REMOTE_HOST",
+            "REDIS_REMOTE_PORT",
+        ),
+    ),
+    (
+        "Bootstrap",
+        (
+            "POST_BOOTSTRAP_LIMIT",
+        ),
+    ),
+]
+
+output = list(kept_lines)
+
+for section_name, keys in sections:
+    output.append("")
+    output.append(f"# {section_name}")
+
+    for key in keys:
+        output.append(
+            f"{key}="
+            f"{json.dumps(settings[key], ensure_ascii=False)}"
+        )
+
+content = "\n".join(output).lstrip("\n").rstrip() + "\n"
+
+env_path.write_text(content, encoding="utf-8")
 env_path.chmod(0o600)
 
-print(".env 已更新，旧的重复 MYSQL_SOURCE/REDIS 配置已删除")
+persistent_path.parent.mkdir(parents=True, exist_ok=True)
+persistent_path.parent.chmod(0o700)
+
+persistent_path.write_text(content, encoding="utf-8")
+persistent_path.chmod(0o600)
+
+print(f"[OK] 配置已写入：{env_path}")
+print(f"[OK] 持久化配置：{persistent_path}")
+print("[OK] Redis 将在恢复脚本中建立隧道后检查")
 PY
-
-unset MYSQL_PASSWORD
-
-echo "========== 最终 MySQL 业务检查 =========="
-
-# 当前 Shell 可能继承旧 MYSQL_SOURCE_* 环境变量。
-# Pydantic Settings 中进程环境变量优先于 .env，因此验证前必须清除。
-unset MYSQL_SOURCE_HOST || true
-unset MYSQL_SOURCE_PORT || true
-unset MYSQL_SOURCE_USER || true
-unset MYSQL_SOURCE_PASSWORD || true
-unset MYSQL_SOURCE_DATABASE || true
-unset MYSQL_SOURCE_TABLE || true
-unset MYSQL_SOURCE_CHARSET || true
-
-
-.venv/bin/python - <<'PY'
-from app.infrastructure.mysql_source import (
-    check_mysql_source_connection,
-    get_mysql_source_settings,
-)
-
-get_mysql_source_settings.cache_clear()
-result = check_mysql_source_connection()
-
-print("database:", result["database_name"])
-print("table:", result["table_name"])
-print("row_count:", result["row_count"])
-print("mysql_version:", result["mysql_version"])
-PY
-
-echo "========== 配置状态 =========="
-
-.venv/bin/python - <<'PY'
-from collections import Counter
-from pathlib import Path
-
-keys = []
-
-for raw in Path(".env").read_text(encoding="utf-8").splitlines():
-    line = raw.strip()
-
-    if not line or line.startswith("#") or "=" not in line:
-        continue
-
-    key = line.split("=", 1)[0]
-
-    if key.startswith("MYSQL_SOURCE_") or key.startswith("REDIS_"):
-        keys.append(key)
-
-counts = Counter(keys)
-
-for key in sorted(counts):
-    print(f"{key}: {counts[key]} occurrence")
-
-if any(count != 1 for count in counts.values()):
-    raise SystemExit("仍存在重复配置")
-PY
-
-echo
-echo "远程 MySQL 和 Redis 配置完成。"
