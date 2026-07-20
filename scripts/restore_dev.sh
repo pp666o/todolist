@@ -190,20 +190,29 @@ ensure_python_environment() {
     python3 -m venv "${ROOT_DIR}/.venv"
   fi
 
+  local requirements_file="${ROOT_DIR}/requirements.txt"
+
+  if [[ -f "${ROOT_DIR}/requirements-dev.txt" ]]; then
+    requirements_file="${ROOT_DIR}/requirements-dev.txt"
+  fi
+
   if ! "${ROOT_DIR}/.venv/bin/python" - <<'PY' >/dev/null 2>&1
+import httpx
 import psycopg
 import pymysql
+import pytest
 import redis
 import pydantic
 import pydantic_settings
 PY
   then
-    printf 'Installing Python dependencies...\n'
+    printf 'Installing Python dependencies from: %s\n' \
+      "${requirements_file}"
 
     "${ROOT_DIR}/.venv/bin/python" \
       -m pip install \
       --disable-pip-version-check \
-      -r "${ROOT_DIR}/requirements.txt"
+      -r "${requirements_file}"
   fi
 
   printf 'Python environment: OK\n'

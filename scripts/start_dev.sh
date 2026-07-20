@@ -56,7 +56,15 @@ echo "Installing backend dependencies..."
 
 python -m pip install --upgrade pip
 
-python -m pip install -r requirements.txt
+REQUIREMENTS_FILE="requirements.txt"
+
+if [[ -f "requirements-dev.txt" ]]; then
+    REQUIREMENTS_FILE="requirements-dev.txt"
+fi
+
+echo "Installing backend dependencies from: ${REQUIREMENTS_FILE}"
+
+python -m pip install -r "${REQUIREMENTS_FILE}"
 
 
 #################################
