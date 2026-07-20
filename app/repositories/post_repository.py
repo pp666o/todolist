@@ -169,6 +169,158 @@ class PostRepository:
 
         return row
 
+    async def search_candidates(
+        self,
+        *,
+        category: str | None = None,
+        visible_statuses: Sequence[str] | None = None,
+        city: str | None = None,
+        district: str | None = None,
+        min_latitude: float | None = None,
+        max_latitude: float | None = None,
+        min_longitude: float | None = None,
+        max_longitude: float | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Return filtered post candidates for downstream ranking.
+
+        This method performs database-level hard filtering and stable
+        candidate ordering. Text scoring, exact distance calculation,
+        Redis feature retrieval, and final ranking belong to the service
+        layer.
+        """
+        if not 1 <= limit <= 2000:
+            raise ValueError("limit must be between 1 and 2000.")
+
+        if category is not None and category not in {
+            "求助",
+            "问答",
+            "吐槽",
+        }:
+            raise ValueError(f"Unsupported post category: {category!r}")
+
+        def validate_range(
+            *,
+            name: str,
+            minimum: float | None,
+            maximum: float | None,
+            lower_bound: float,
+            upper_bound: float,
+        ) -> None:
+            if (minimum is None) != (maximum is None):
+                raise ValueError(
+                    f"{name} minimum and maximum must be provided together."
+                )
+
+            if minimum is None or maximum is None:
+                return
+
+            if not lower_bound <= minimum <= upper_bound:
+                raise ValueError(
+                    f"{name} minimum must be between "
+                    f"{lower_bound} and {upper_bound}."
+                )
+
+            if not lower_bound <= maximum <= upper_bound:
+                raise ValueError(
+                    f"{name} maximum must be between "
+                    f"{lower_bound} and {upper_bound}."
+                )
+
+            if minimum > maximum:
+                raise ValueError(
+                    f"{name} minimum cannot exceed maximum."
+                )
+
+        validate_range(
+            name="latitude",
+            minimum=min_latitude,
+            maximum=max_latitude,
+            lower_bound=-90,
+            upper_bound=90,
+        )
+        validate_range(
+            name="longitude",
+            minimum=min_longitude,
+            maximum=max_longitude,
+            lower_bound=-180,
+            upper_bound=180,
+        )
+
+        normalized_statuses = list(
+            dict.fromkeys(
+                status.strip()
+                for status in (visible_statuses or ())
+                if status and status.strip()
+            )
+        )
+
+        normalized_city = city.strip() if city else None
+        normalized_district = district.strip() if district else None
+
+        conditions: list[str] = []
+        parameters: dict[str, Any] = {
+            "limit": limit,
+        }
+
+        if category is not None:
+            conditions.append("category = %(category)s")
+            parameters["category"] = category
+
+        if normalized_statuses:
+            conditions.append(
+                "visible_status = ANY(%(visible_statuses)s)"
+            )
+            parameters["visible_statuses"] = normalized_statuses
+
+        if normalized_city:
+            conditions.append("city = %(city)s")
+            parameters["city"] = normalized_city
+
+        if normalized_district:
+            conditions.append("district = %(district)s")
+            parameters["district"] = normalized_district
+
+        if min_latitude is not None and max_latitude is not None:
+            conditions.append(
+                "latitude BETWEEN %(min_latitude)s AND %(max_latitude)s"
+            )
+            parameters["min_latitude"] = min_latitude
+            parameters["max_latitude"] = max_latitude
+
+        if min_longitude is not None and max_longitude is not None:
+            conditions.append(
+                "longitude BETWEEN %(min_longitude)s AND %(max_longitude)s"
+            )
+            parameters["min_longitude"] = min_longitude
+            parameters["max_longitude"] = max_longitude
+
+        where_sql = (
+            " AND\n                ".join(conditions)
+            if conditions
+            else "TRUE"
+        )
+
+        query = f"""
+            SELECT
+                {POST_SELECT_COLUMNS}
+            FROM posts
+            WHERE
+                {where_sql}
+            ORDER BY
+                updated_at DESC NULLS LAST,
+                views DESC,
+                id DESC
+            LIMIT %(limit)s
+        """
+
+        async with await connect_postgres() as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(query, parameters)
+                rows = await cursor.fetchall()
+
+        return list(rows)
+
     async def upsert_many(
         self,
         posts: Sequence[PostUpsert],

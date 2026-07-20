@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.domain.post import PostCategory
 
@@ -34,14 +34,42 @@ class PostSearchRequest(BaseModel):
     longitude: Optional[float] = Field(default=None, ge=-180, le=180)
     radius_km: Optional[float] = Field(default=None, gt=0, le=500)
 
-    class Config:
-        extra = "forbid"
+    @model_validator(mode="after")
+    def validate_search_parameters(self) -> "PostSearchRequest":
+        """Validate relationships between search parameters."""
+        self.query = self.query.strip()
+
+        if not self.query:
+            raise ValueError("query must not be blank")
+
+        if self.top_k > self.recall_k:
+            raise ValueError("top_k cannot exceed recall_k")
+
+        has_latitude = self.latitude is not None
+        has_longitude = self.longitude is not None
+
+        if has_latitude != has_longitude:
+            raise ValueError(
+                "latitude and longitude must be provided together"
+            )
+
+        if self.radius_km is not None and not has_latitude:
+            raise ValueError(
+                "radius_km requires latitude and longitude"
+            )
+
+        return self
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class PostSearchHit(BaseModel):
     """单条帖子搜索结果。"""
 
     post_id: int
+    source: str
+    source_id: str
+
     title: str
     content: str
     category: PostCategory
@@ -56,6 +84,7 @@ class PostSearchHit(BaseModel):
     distance_km: Optional[float] = None
 
     score: float
+    text_score: Optional[float] = None
     semantic_score: Optional[float] = None
     bm25_score: Optional[float] = None
     geo_score: Optional[float] = None
