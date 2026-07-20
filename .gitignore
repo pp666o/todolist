@@ -58,3 +58,6 @@ __MACOSX/
 # Frontend dependencies
 frontend/node_modules/
 node_modules/
+
+# Generated search evaluation reports
+data/evaluation/results/
