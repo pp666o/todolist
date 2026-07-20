@@ -44,6 +44,12 @@ DEFAULT_CHECKPOINT_PATH = Path(
 
 CHECKPOINT_VERSION = 1
 
+SYNC_MODES = (
+    "bootstrap",
+    "append",
+    "full",
+)
+
 RETRYABLE_EXCEPTIONS = (
     MySQLError,
     PostgresError,
@@ -171,6 +177,27 @@ async def read_postgres_summary() -> dict[str, Any]:
             for row in status_rows
         },
     }
+
+
+async def read_postgres_max_source_id() -> int:
+    """Return the greatest synchronized numeric MySQL source ID."""
+    async with await connect_postgres() as connection:
+        async with connection.cursor() as cursor:
+            await cursor.execute(
+                """
+                SELECT max(source_id::bigint) AS max_source_id
+                FROM posts
+                WHERE source = %s
+                  AND source_id ~ '^[0-9]+$'
+                """,
+                (MYSQL_POST_SOURCE,),
+            )
+            row = await cursor.fetchone()
+
+    if row is None or row["max_source_id"] is None:
+        return 0
+
+    return int(row["max_source_id"])
 
 
 def validate_sync_parameters(
@@ -469,6 +496,44 @@ def resolve_after_id(
     return resolved_after_id
 
 
+async def resolve_starting_after_id(
+    *,
+    mode: str,
+    after_id: int,
+    resume: bool,
+    checkpoint_path: Path | None,
+    max_retries: int,
+    retry_backoff_seconds: float,
+) -> int:
+    """Resolve the starting source ID for a synchronization run."""
+    if resume:
+        return resolve_after_id(
+            after_id=after_id,
+            resume=True,
+            checkpoint_path=checkpoint_path,
+        )
+
+    if mode == "append":
+        resolved_after_id = await run_async_with_retry(
+            read_postgres_max_source_id,
+            operation_name=(
+                "Read PostgreSQL append synchronization cursor"
+            ),
+            max_retries=max_retries,
+            backoff_seconds=retry_backoff_seconds,
+        )
+
+        print("========== Append cursor ==========")
+        print(
+            "PostgreSQL max synchronized source_id:",
+            resolved_after_id,
+        )
+
+        return resolved_after_id
+
+    return after_id
+
+
 async def synchronize(
     *,
     batch_size: int,
@@ -719,6 +784,18 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "--mode",
+        choices=SYNC_MODES,
+        default=None,
+        help=(
+            "Synchronization mode. bootstrap keeps the legacy "
+            "bounded behavior; append starts after the greatest "
+            "PostgreSQL source_id; full scans until MySQL is "
+            "exhausted. Legacy --all selects full mode."
+        ),
+    )
+
+    parser.add_argument(
         "--batch-size",
         type=int,
         default=DEFAULT_BATCH_SIZE,
@@ -807,10 +884,41 @@ def parse_args() -> argparse.Namespace:
 
     args = parser.parse_args()
 
-    if args.all:
+    if args.mode is None:
+        args.mode = "full" if args.all else "bootstrap"
+
+    if args.all and args.mode != "full":
+        parser.error(
+            "--all is only compatible with --mode full."
+        )
+
+    if args.mode == "full":
+        if args.max_rows is not None:
+            parser.error(
+                "--mode full cannot be combined with "
+                "--max-rows or --limit."
+            )
+
         args.max_rows = None
-    elif args.max_rows is None:
-        args.max_rows = DEFAULT_MAX_ROWS
+
+    elif args.mode == "append":
+        if args.after_id != 0:
+            parser.error(
+                "--mode append cannot be combined with "
+                "a non-zero --after-id."
+            )
+
+        # None means synchronize every currently available new row.
+        # A positive --max-rows may be used for bounded verification.
+
+    else:
+        if args.all:
+            parser.error(
+                "--mode bootstrap cannot be combined with --all."
+            )
+
+        if args.max_rows is None:
+            args.max_rows = DEFAULT_MAX_ROWS
 
     if args.no_checkpoint and args.resume:
         parser.error(
@@ -869,11 +977,20 @@ def main() -> None:
             checkpoint_path,
         )
 
+    print("Selected synchronization mode:", args.mode)
+
     try:
-        resolved_after_id = resolve_after_id(
-            after_id=args.after_id,
-            resume=args.resume,
-            checkpoint_path=checkpoint_path,
+        resolved_after_id = asyncio.run(
+            resolve_starting_after_id(
+                mode=args.mode,
+                after_id=args.after_id,
+                resume=args.resume,
+                checkpoint_path=checkpoint_path,
+                max_retries=args.max_retries,
+                retry_backoff_seconds=(
+                    args.retry_backoff_seconds
+                ),
+            )
         )
     except (FileNotFoundError, ValueError) as exc:
         raise SystemExit(f"ERROR: {exc}") from exc

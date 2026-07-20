@@ -442,3 +442,85 @@ def test_synchronize_writes_last_committed_checkpoint_on_failure(
     assert checkpoint["loaded_rows"] == 2
     assert checkpoint["upserted_rows"] == 2
     assert checkpoint["error_type"] == "ConnectionError"
+
+
+def test_parse_args_legacy_all_selects_full_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "sync_mysql_posts.py",
+            "--all",
+        ],
+    )
+
+    args = sync_module.parse_args()
+
+    assert args.mode == "full"
+    assert args.max_rows is None
+    assert args.after_id == 0
+
+
+def test_parse_args_append_mode_is_unbounded_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "sync_mysql_posts.py",
+            "--mode",
+            "append",
+        ],
+    )
+
+    args = sync_module.parse_args()
+
+    assert args.mode == "append"
+    assert args.max_rows is None
+    assert args.after_id == 0
+
+
+def test_parse_args_bootstrap_keeps_legacy_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "sync_mysql_posts.py",
+            "--mode",
+            "bootstrap",
+        ],
+    )
+
+    args = sync_module.parse_args()
+
+    assert args.mode == "bootstrap"
+    assert args.max_rows == sync_module.DEFAULT_MAX_ROWS
+    assert args.after_id == 0
+
+
+def test_resolve_starting_after_id_uses_postgres_for_append(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_max_source_id() -> int:
+        return 98765
+
+    monkeypatch.setattr(
+        sync_module,
+        "read_postgres_max_source_id",
+        fake_max_source_id,
+    )
+
+    resolved = asyncio.run(
+        sync_module.resolve_starting_after_id(
+            mode="append",
+            after_id=0,
+            resume=False,
+            checkpoint_path=None,
+            max_retries=0,
+            retry_backoff_seconds=0,
+        )
+    )
+
+    assert resolved == 98765
