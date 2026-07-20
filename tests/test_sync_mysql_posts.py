@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import asyncio
 from types import SimpleNamespace
 from typing import Any
@@ -249,3 +251,194 @@ def test_parse_args_all_selects_unbounded_sync(
     assert args.batch_size == 500
     assert args.max_rows is None
     assert args.after_id == 100
+
+
+def test_checkpoint_round_trip(
+    tmp_path: Path,
+) -> None:
+    checkpoint_path = tmp_path / "checkpoint.json"
+
+    payload = sync_module.build_checkpoint(
+        status="running",
+        initial_after_id=0,
+        last_source_id=123,
+        batch_size=1000,
+        max_rows=None,
+        batch_count=2,
+        loaded_rows=2000,
+        upserted_rows=2000,
+    )
+
+    sync_module.write_checkpoint(
+        checkpoint_path,
+        payload,
+    )
+
+    loaded = sync_module.load_checkpoint(
+        checkpoint_path,
+    )
+
+    assert loaded["status"] == "running"
+    assert loaded["last_source_id"] == 123
+    assert loaded["loaded_rows"] == 2000
+    assert loaded["source"] == sync_module.MYSQL_POST_SOURCE
+
+
+def test_resolve_after_id_uses_checkpoint(
+    tmp_path: Path,
+) -> None:
+    checkpoint_path = tmp_path / "checkpoint.json"
+
+    sync_module.write_checkpoint(
+        checkpoint_path,
+        sync_module.build_checkpoint(
+            status="failed",
+            initial_after_id=0,
+            last_source_id=456,
+            batch_size=1000,
+            max_rows=None,
+            batch_count=1,
+            loaded_rows=1000,
+            upserted_rows=1000,
+        ),
+    )
+
+    resolved = sync_module.resolve_after_id(
+        after_id=0,
+        resume=True,
+        checkpoint_path=checkpoint_path,
+    )
+
+    assert resolved == 456
+
+
+def test_run_with_retry_recovers_from_transient_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+    sleeps: list[float] = []
+
+    def operation() -> str:
+        nonlocal calls
+        calls += 1
+
+        if calls < 3:
+            raise ConnectionError("temporary failure")
+
+        return "ok"
+
+    monkeypatch.setattr(
+        sync_module.time,
+        "sleep",
+        sleeps.append,
+    )
+
+    result = sync_module.run_with_retry(
+        operation,
+        operation_name="test operation",
+        max_retries=3,
+        backoff_seconds=0.5,
+    )
+
+    assert result == "ok"
+    assert calls == 3
+    assert sleeps == [0.5, 1.0]
+
+
+def test_run_with_retry_raises_after_retry_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def operation() -> None:
+        nonlocal calls
+        calls += 1
+        raise ConnectionError("still unavailable")
+
+    monkeypatch.setattr(
+        sync_module.time,
+        "sleep",
+        lambda _: None,
+    )
+
+    with pytest.raises(ConnectionError):
+        sync_module.run_with_retry(
+            operation,
+            operation_name="test operation",
+            max_retries=2,
+            backoff_seconds=0,
+        )
+
+    assert calls == 3
+
+
+def test_synchronize_writes_last_committed_checkpoint_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    checkpoint_path = tmp_path / "checkpoint.json"
+    read_calls = 0
+
+    source_rows = [
+        {"id": 10},
+        {"id": 20},
+    ]
+
+    def fake_read(
+        limit: int,
+        after_id: int,
+    ) -> list[dict[str, Any]]:
+        nonlocal read_calls
+        read_calls += 1
+
+        if read_calls == 1:
+            return source_rows
+
+        raise ConnectionError("source unavailable")
+
+    async def fake_upsert(posts: list[Any]) -> int:
+        return len(posts)
+
+    monkeypatch.setattr(
+        sync_module,
+        "read_mysql_posts",
+        fake_read,
+    )
+    monkeypatch.setattr(
+        sync_module,
+        "map_mysql_post_row",
+        make_post,
+    )
+    monkeypatch.setattr(
+        sync_module.post_repository,
+        "upsert_many",
+        fake_upsert,
+    )
+    monkeypatch.setattr(
+        sync_module.time,
+        "sleep",
+        lambda _: None,
+    )
+
+    with pytest.raises(ConnectionError):
+        asyncio.run(
+            sync_module.synchronize(
+                batch_size=2,
+                after_id=0,
+                max_rows=None,
+                checkpoint_path=checkpoint_path,
+                max_retries=1,
+                retry_backoff_seconds=0,
+            )
+        )
+
+    checkpoint = sync_module.load_checkpoint(
+        checkpoint_path,
+    )
+
+    assert checkpoint["status"] == "failed"
+    assert checkpoint["last_source_id"] == 20
+    assert checkpoint["batch_count"] == 1
+    assert checkpoint["loaded_rows"] == 2
+    assert checkpoint["upserted_rows"] == 2
+    assert checkpoint["error_type"] == "ConnectionError"

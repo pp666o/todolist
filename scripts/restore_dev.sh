@@ -705,6 +705,7 @@ bootstrap_posts() {
   PYTHONPATH="${ROOT_DIR}" \
     "${ROOT_DIR}/.venv/bin/python" \
     "${ROOT_DIR}/scripts/sync_mysql_posts.py" \
+    --no-checkpoint \
     --limit "${bootstrap_limit}" \
     --after-id 0
 }
