@@ -17,9 +17,10 @@ from app.schemas.post_search import (
     PostSearchRequest,
     PostSearchResponse,
 )
-
-
-EARTH_RADIUS_KM = 6371.0088
+from app.search.geo import (
+    calculate_bounding_box as _calculate_bounding_box,
+    haversine_km as _haversine_km,
+)
 
 
 def _normalize_text(value: str | None) -> str:
@@ -145,80 +146,6 @@ def _calculate_text_score(
         recall_sources,
         reasons,
     )
-
-
-def _haversine_km(
-    latitude_a: float,
-    longitude_a: float,
-    latitude_b: float,
-    longitude_b: float,
-) -> float:
-    """Calculate great-circle distance in kilometres."""
-    latitude_a_rad = math.radians(latitude_a)
-    latitude_b_rad = math.radians(latitude_b)
-
-    latitude_delta = math.radians(
-        latitude_b - latitude_a
-    )
-    longitude_delta = math.radians(
-        longitude_b - longitude_a
-    )
-
-    haversine = (
-        math.sin(latitude_delta / 2) ** 2
-        + math.cos(latitude_a_rad)
-        * math.cos(latitude_b_rad)
-        * math.sin(longitude_delta / 2) ** 2
-    )
-
-    angular_distance = 2 * math.asin(
-        min(1.0, math.sqrt(haversine))
-    )
-
-    return EARTH_RADIUS_KM * angular_distance
-
-
-def _calculate_bounding_box(
-    latitude: float,
-    longitude: float,
-    radius_km: float,
-) -> dict[str, float | None]:
-    """Calculate a coarse SQL bounding box."""
-    latitude_delta = radius_km / 111.32
-
-    min_latitude = max(-90.0, latitude - latitude_delta)
-    max_latitude = min(90.0, latitude + latitude_delta)
-
-    cosine = abs(math.cos(math.radians(latitude)))
-
-    if cosine < 1e-6:
-        return {
-            "min_latitude": min_latitude,
-            "max_latitude": max_latitude,
-            "min_longitude": None,
-            "max_longitude": None,
-        }
-
-    longitude_delta = radius_km / (111.32 * cosine)
-
-    # Bounding boxes crossing the date line are skipped here.
-    # Exact Haversine filtering still runs below.
-    if (
-        longitude - longitude_delta < -180
-        or longitude + longitude_delta > 180
-    ):
-        min_longitude = None
-        max_longitude = None
-    else:
-        min_longitude = longitude - longitude_delta
-        max_longitude = longitude + longitude_delta
-
-    return {
-        "min_latitude": min_latitude,
-        "max_latitude": max_latitude,
-        "min_longitude": min_longitude,
-        "max_longitude": max_longitude,
-    }
 
 
 def _min_max_normalize(values: list[float]) -> list[float]:
