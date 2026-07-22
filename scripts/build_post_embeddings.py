@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import math
-from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -14,216 +13,17 @@ import numpy as np
 from psycopg import AsyncConnection
 
 from app.infrastructure.postgres import connect_postgres
-
-
-MODEL_DIMENSION = 512
-DEFAULT_BATCH_SIZE = 32
-DEFAULT_MODEL_PATH = Path(
-    "/workspace/models/bge-small-zh-v1.5"
+from app.search.embedding import (
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_MODEL_PATH,
+    MODEL_DIMENSION,
+    build_post_text,
+    embedding_to_pgvector,
+    encode_documents,
+    load_model,
+    resolve_device,
+    validate_embedding_batch,
 )
-
-
-def build_post_text(row: Mapping[str, Any]) -> str:
-    """Build the document text encoded for semantic retrieval."""
-
-    title = str(row.get("title") or "").strip()
-    category = str(row.get("category") or "").strip()
-    content = str(row.get("content") or "").strip()
-
-    raw_tags = row.get("tags") or []
-    tags = [
-        str(tag).strip()
-        for tag in raw_tags
-        if str(tag).strip()
-    ]
-
-    parts: list[str] = []
-
-    if title:
-        parts.append(f"标题：{title}")
-
-    if category:
-        parts.append(f"类别：{category}")
-
-    if tags:
-        parts.append(f"标签：{' '.join(tags)}")
-
-    if content:
-        parts.append(f"正文：{content}")
-
-    if not parts:
-        raise ValueError(
-            f"Post {row.get('id')} has no encodable text."
-        )
-
-    return "\n".join(parts)
-
-
-def embedding_to_pgvector(
-    embedding: Sequence[float] | np.ndarray,
-) -> str:
-    """Serialize one embedding into pgvector text format."""
-
-    vector = np.asarray(
-        embedding,
-        dtype=np.float32,
-    )
-
-    if vector.shape != (MODEL_DIMENSION,):
-        raise ValueError(
-            "Expected one embedding with shape "
-            f"({MODEL_DIMENSION},), got {vector.shape}."
-        )
-
-    if not np.isfinite(vector).all():
-        raise ValueError(
-            "Embedding contains NaN or infinite values."
-        )
-
-    return (
-        "["
-        + ",".join(
-            format(float(value), ".9g")
-            for value in vector
-        )
-        + "]"
-    )
-
-
-def validate_embedding_batch(
-    embeddings: np.ndarray,
-    *,
-    expected_rows: int,
-) -> np.ndarray:
-    """Validate output shape, finite values, and normalization."""
-
-    vectors = np.asarray(
-        embeddings,
-        dtype=np.float32,
-    )
-
-    expected_shape = (
-        expected_rows,
-        MODEL_DIMENSION,
-    )
-
-    if vectors.shape != expected_shape:
-        raise ValueError(
-            f"Expected embedding shape {expected_shape}, "
-            f"got {vectors.shape}."
-        )
-
-    if not np.isfinite(vectors).all():
-        raise ValueError(
-            "Embedding batch contains NaN or infinite values."
-        )
-
-    norms = np.linalg.norm(
-        vectors,
-        axis=1,
-    )
-
-    if not np.allclose(
-        norms,
-        1.0,
-        atol=1e-4,
-    ):
-        raise ValueError(
-            "Embedding batch is not L2-normalized. "
-            f"Observed norm range: "
-            f"{float(norms.min()):.6f}–"
-            f"{float(norms.max()):.6f}"
-        )
-
-    return norms
-
-
-def resolve_device(requested_device: str) -> str:
-    """Resolve auto/cpu/cuda into an available Torch device."""
-
-    import torch
-
-    if requested_device == "auto":
-        return (
-            "cuda"
-            if torch.cuda.is_available()
-            else "cpu"
-        )
-
-    if (
-        requested_device == "cuda"
-        and not torch.cuda.is_available()
-    ):
-        raise RuntimeError(
-            "CUDA was requested, but Torch reports "
-            "that CUDA is unavailable."
-        )
-
-    return requested_device
-
-
-def load_model(
-    model_path: Path,
-    *,
-    device: str,
-) -> Any:
-    """Load the local Sentence Transformer model lazily."""
-
-    from sentence_transformers import (
-        SentenceTransformer,
-    )
-
-    model = SentenceTransformer(
-        str(model_path),
-        device=device,
-    )
-
-    dimension = model.get_embedding_dimension()
-
-    if dimension != MODEL_DIMENSION:
-        raise RuntimeError(
-            f"Model dimension is {dimension}; "
-            f"database schema expects {MODEL_DIMENSION}."
-        )
-
-    return model
-
-
-def encode_documents(
-    model: Any,
-    texts: list[str],
-    *,
-    batch_size: int,
-) -> np.ndarray:
-    """Encode document texts using the model's document API."""
-
-    document_encoder = getattr(
-        model,
-        "encode_document",
-        None,
-    )
-
-    if callable(document_encoder):
-        embeddings = document_encoder(
-            texts,
-            batch_size=batch_size,
-            normalize_embeddings=True,
-            convert_to_numpy=True,
-            show_progress_bar=False,
-        )
-    else:
-        embeddings = model.encode(
-            texts,
-            batch_size=batch_size,
-            normalize_embeddings=True,
-            convert_to_numpy=True,
-            show_progress_bar=False,
-        )
-
-    return np.asarray(
-        embeddings,
-        dtype=np.float32,
-    )
 
 
 async def count_missing_embeddings(
