@@ -96,7 +96,7 @@ def normalized_vector() -> np.ndarray:
         (0, 100, "limit"),
         (2001, 100, "limit"),
         (20, 0, "ef_search"),
-        (20, 10001, "ef_search"),
+        (20, 1001, "ef_search"),
     ],
 )
 def test_validate_semantic_search_parameters_rejects_invalid(
@@ -121,7 +121,7 @@ def test_validate_semantic_search_parameters_accepts_bounds() -> None:
     )
     validate_semantic_search_parameters(
         limit=2000,
-        ef_search=10000,
+        ef_search=1000,
     )
 
 

@@ -12,7 +12,7 @@ from app.search.embedding import embedding_to_pgvector
 
 
 MAX_RECALL_LIMIT = 2000
-MAX_EF_SEARCH = 10000
+MAX_EF_SEARCH = 1000
 
 
 class SemanticCandidate(TypedDict):
