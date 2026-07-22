@@ -8,7 +8,7 @@ PERSIST_ENV="${HOME}/.config/geo-post-search/env"
 
 POSTGRES_COMPOSE_FILE="${ROOT_DIR}/compose.postgres.yml"
 POSTGRES_CONTAINER="geo-postgres"
-POSTS_MIGRATION="${ROOT_DIR}/db/migrations/001_create_posts.sql"
+MIGRATIONS_DIR="${ROOT_DIR}/db/migrations"
 
 CONFIGURE_REMOTE_SCRIPT="${ROOT_DIR}/scripts/configure_remote_sources.sh"
 START_DEV_SCRIPT="${ROOT_DIR}/scripts/start_dev.sh"
@@ -557,29 +557,51 @@ PYSQL
   printf 'PostgreSQL user password: synchronized\n'
 }
 
-apply_migration() {
-  log "执行 PostgreSQL 迁移"
+apply_migrations() {
+  log "执行 PostgreSQL Migration"
 
+  local postgres_database
   local postgres_user
-  local postgres_db
+  local migration_file
+  local -a migration_files=()
 
-  postgres_user="$(read_env_value POSTGRES_USER)"
-  postgres_db="$(read_env_value POSTGRES_DB)"
+  postgres_database="$(
+    env_value_or_default "POSTGRES_DB" "geo_posts"
+  )"
 
-  [[ -n "${postgres_user}" ]] \
-    || fail "POSTGRES_USER is missing"
+  postgres_user="$(
+    env_value_or_default "POSTGRES_USER" "geo_posts"
+  )"
 
-  [[ -n "${postgres_db}" ]] \
-    || fail "POSTGRES_DB is missing"
+  mapfile -t migration_files < <(
+    find "${MIGRATIONS_DIR}" \
+      -maxdepth 1 \
+      -type f \
+      -name '*.sql' \
+      -print \
+      | sort
+  )
 
-  docker exec -i "${POSTGRES_CONTAINER}" \
-    psql \
-    -v ON_ERROR_STOP=1 \
-    -U "${postgres_user}" \
-    -d "${postgres_db}" \
-    < "${POSTS_MIGRATION}"
+  ((${#migration_files[@]} > 0)) \
+    || fail \
+      "no PostgreSQL migrations found in ${MIGRATIONS_DIR}"
 
-  printf 'PostgreSQL migration: OK\n'
+  for migration_file in "${migration_files[@]}"; do
+    printf \
+      'Applying PostgreSQL migration: %s\n' \
+      "$(basename "${migration_file}")"
+
+    docker exec -i "${POSTGRES_CONTAINER}" \
+      psql \
+      -U "${postgres_user}" \
+      -d "${postgres_database}" \
+      -v ON_ERROR_STOP=1 \
+      < "${migration_file}"
+  done
+
+  printf \
+    'PostgreSQL migrations: OK (%d files)\n' \
+    "${#migration_files[@]}"
 }
 
 
@@ -776,8 +798,11 @@ main() {
   [[ -f "${POSTGRES_COMPOSE_FILE}" ]] \
     || fail "compose.postgres.yml does not exist"
 
-  [[ -f "${POSTS_MIGRATION}" ]] \
-    || fail "posts migration does not exist"
+  [[ -d "${MIGRATIONS_DIR}" ]] \
+    || fail "PostgreSQL migrations directory does not exist"
+
+  compgen -G "${MIGRATIONS_DIR}/*.sql" >/dev/null \
+    || fail "no PostgreSQL migration files found"
 
   [[ -f "${CONFIGURE_REMOTE_SCRIPT}" ]] \
     || fail "configure_remote_sources.sh does not exist"
@@ -794,7 +819,7 @@ main() {
 
   start_postgres
   synchronize_postgres_password
-  apply_migration
+  apply_migrations
   ensure_redis_tunnel
   bootstrap_posts
   show_summary
