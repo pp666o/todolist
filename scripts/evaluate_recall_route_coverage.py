@@ -594,6 +594,18 @@ def analyze_case_routes(
             )
             for route_name in ROUTES
         },
+        "route_business_keys": {
+            route_name: [
+                {
+                    "source": source,
+                    "source_id": source_id,
+                }
+                for source, source_id in (
+                    route_keys[route_name]
+                )
+            ]
+            for route_name in ROUTES
+        },
         "route_source_ids": {
             route_name: [
                 source_id

@@ -380,3 +380,43 @@ def test_freshness_retrieval_maps_filters_and_radius() -> None:
             rel=0.01,
         )
     )
+
+
+def test_analysis_exports_business_keys() -> None:
+    result = analyze_case_routes(
+        case=make_case(),
+        route_candidates={
+            "freshness": [
+                candidate(
+                    "same",
+                    source="mysql-a",
+                ),
+            ],
+            "lexical": [
+                candidate(
+                    "same",
+                    source="mysql-b",
+                ),
+            ],
+            "semantic": [],
+        },
+        cutoffs=[1],
+    )
+
+    assert result[
+        "route_business_keys"
+    ]["freshness"] == [
+        {
+            "source": "mysql-a",
+            "source_id": "same",
+        }
+    ]
+
+    assert result[
+        "route_business_keys"
+    ]["lexical"] == [
+        {
+            "source": "mysql-b",
+            "source_id": "same",
+        }
+    ]
