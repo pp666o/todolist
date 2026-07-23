@@ -675,72 +675,27 @@ ensure_redis_tunnel() {
 
 
 bootstrap_posts() {
+  # 保留原函数名，避免修改主恢复流程的调用顺序。
+  #
+  # 旧实现仅同步 POST_BOOTSTRAP_LIMIT（默认 1000）条帖子，
+  # 在 Docker 数据卷丢失后会留下一个看似正常、实际不完整的数据库。
+  #
+  # 新实现委托给 restore_search_assets.sh：
+  #   远程 MySQL 精确对账
+  #   → 必要时全量幂等同步
+  #   → BGE 模型恢复或下载
+  #   → 缺失 Embedding 断点续建
+  #   → HNSW 和向量完整性检查
+  local restore_args=()
+
   if ((SKIP_SYNC == 1)); then
-    log "跳过帖子数据补齐"
-    return
+    restore_args+=(--skip-sync)
   fi
 
-  log "检查 PostgreSQL 帖子数据"
-
-  local bootstrap_limit
-  local current_count
-  local postgres_user
-  local postgres_db
-
-  bootstrap_limit="$(
-    env_value_or_default POST_BOOTSTRAP_LIMIT 1000
-  )"
-
-  [[ "${bootstrap_limit}" =~ ^[0-9]+$ ]] \
-    || fail "POST_BOOTSTRAP_LIMIT must be an integer"
-
-  postgres_user="$(read_env_value POSTGRES_USER)"
-  postgres_db="$(read_env_value POSTGRES_DB)"
-
-  current_count="$(
-    docker exec "${POSTGRES_CONTAINER}" \
-      psql \
-      -U "${postgres_user}" \
-      -d "${postgres_db}" \
-      -Atqc "
-        SELECT count(*)
-        FROM posts
-        WHERE source = 'mysql_tiezi_geo_new';
-      "
-  )"
-
-  current_count="${current_count//[[:space:]]/}"
-
-  [[ "${current_count}" =~ ^[0-9]+$ ]] \
-    || fail "could not determine PostgreSQL post count"
-
-  printf 'Current MySQL-derived posts: %s\n' \
-    "${current_count}"
-
-  printf 'Bootstrap target: %s\n' \
-    "${bootstrap_limit}"
-
-  if ((current_count >= bootstrap_limit)); then
-    printf 'Post bootstrap not required.\n'
-    return
-  fi
-
-  unset MYSQL_SOURCE_HOST || true
-  unset MYSQL_SOURCE_PORT || true
-  unset MYSQL_SOURCE_USER || true
-  unset MYSQL_SOURCE_PASSWORD || true
-  unset MYSQL_SOURCE_DATABASE || true
-  unset MYSQL_SOURCE_TABLE || true
-  unset MYSQL_SOURCE_CHARSET || true
-
-  PYTHONPATH="${ROOT_DIR}" \
-    "${ROOT_DIR}/.venv/bin/python" \
-    "${ROOT_DIR}/scripts/sync_mysql_posts.py" \
-    --no-checkpoint \
-    --limit "${bootstrap_limit}" \
-    --after-id 0
+  bash \
+    "${ROOT_DIR}/scripts/restore_search_assets.sh" \
+    "${restore_args[@]}"
 }
-
 
 show_summary() {
   log "恢复结果"
