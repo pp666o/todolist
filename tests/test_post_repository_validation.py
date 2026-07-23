@@ -66,3 +66,50 @@ def test_invalid_bounds_are_rejected(kwargs: dict) -> None:
 
     with pytest.raises(ValueError):
         run(repository.search_candidates(**kwargs))
+
+
+def test_fetch_by_source_keys_returns_empty_without_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail_connect():
+        raise AssertionError(
+            "empty hydration must not open PostgreSQL"
+        )
+
+    monkeypatch.setattr(
+        "app.repositories.post_repository.connect_postgres",
+        fail_connect,
+    )
+
+    repository = PostRepository()
+
+    assert run(
+        repository.fetch_by_source_keys([])
+    ) == []
+
+
+@pytest.mark.parametrize(
+    "source_keys",
+    [
+        [
+            ("", "1"),
+        ],
+        [
+            ("mysql", ""),
+        ],
+        [
+            ("only-one-value",),
+        ],
+    ],
+)
+def test_fetch_by_source_keys_rejects_invalid_keys(
+    source_keys,
+) -> None:
+    repository = PostRepository()
+
+    with pytest.raises(ValueError):
+        run(
+            repository.fetch_by_source_keys(
+                source_keys
+            )
+        )

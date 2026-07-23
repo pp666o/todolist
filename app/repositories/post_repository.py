@@ -321,6 +321,98 @@ class PostRepository:
 
         return list(rows)
 
+    async def fetch_by_source_keys(
+        self,
+        source_keys: Sequence[tuple[str, str]],
+    ) -> list[dict[str, Any]]:
+        """Hydrate posts by business keys in requested order."""
+
+        normalized_keys: list[
+            tuple[str, str]
+        ] = []
+        seen: set[tuple[str, str]] = set()
+
+        for raw_key in source_keys:
+            if len(raw_key) != 2:
+                raise ValueError(
+                    "source key must contain "
+                    "(source, source_id)"
+                )
+
+            source = str(raw_key[0]).strip()
+            source_id = str(raw_key[1]).strip()
+
+            if not source:
+                raise ValueError(
+                    "source must not be blank"
+                )
+
+            if not source_id:
+                raise ValueError(
+                    "source_id must not be blank"
+                )
+
+            key = source, source_id
+
+            if key in seen:
+                continue
+
+            seen.add(key)
+            normalized_keys.append(key)
+
+        if not normalized_keys:
+            return []
+
+        parameters = {
+            "sources": [
+                source
+                for source, _ in normalized_keys
+            ],
+            "source_ids": [
+                source_id
+                for _, source_id in normalized_keys
+            ],
+        }
+
+        query = f"""
+            WITH requested AS (
+                SELECT
+                    source,
+                    source_id,
+                    ordinal
+                FROM unnest(
+                    %(sources)s::text[],
+                    %(source_ids)s::text[]
+                ) WITH ORDINALITY AS input(
+                    source,
+                    source_id,
+                    ordinal
+                )
+            ),
+            hydrated AS (
+                SELECT
+                    {POST_SELECT_COLUMNS}
+                FROM posts
+            )
+            SELECT
+                hydrated.*
+            FROM requested
+            JOIN hydrated
+              ON hydrated.source = requested.source
+             AND hydrated.source_id = requested.source_id
+            ORDER BY requested.ordinal
+        """
+
+        async with await connect_postgres() as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(
+                    query,
+                    parameters,
+                )
+                rows = await cursor.fetchall()
+
+        return list(rows)
+
     async def upsert_many(
         self,
         posts: Sequence[PostUpsert],

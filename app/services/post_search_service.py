@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import unicodedata
+from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import uuid4
 
@@ -17,10 +18,20 @@ from app.schemas.post_search import (
     PostSearchRequest,
     PostSearchResponse,
 )
+from app.search.candidate_merge import (
+    hydrate_recall_candidates,
+    merge_recall_candidates,
+)
 from app.search.geo import (
     calculate_bounding_box as _calculate_bounding_box,
     haversine_km as _haversine_km,
 )
+
+
+SemanticRecaller = Callable[
+    [PostSearchRequest],
+    Awaitable[list[dict[str, Any]]],
+]
 
 
 def _normalize_text(value: str | None) -> str:
@@ -211,14 +222,105 @@ def _unlock_raw(
     return math.log1p(unlocks_24h)
 
 
+def _validate_semantic_ranking_parameters(
+    *,
+    semantic_weight: float,
+    semantic_zero_text_min_score: float,
+) -> None:
+    """Validate configurable semantic-ranking parameters."""
+
+    if not 0.0 <= semantic_weight <= 1.0:
+        raise ValueError(
+            "semantic_weight must be between 0 and 1"
+        )
+
+    if not (
+        0.0
+        <= semantic_zero_text_min_score
+        <= 1.0
+    ):
+        raise ValueError(
+            "semantic_zero_text_min_score "
+            "must be between 0 and 1"
+        )
+
+
+def _semantic_ranking_score(
+    semantic_score: float | None,
+    *,
+    minimum_score: float,
+) -> float:
+    """Calibrate raw cosine similarity above one threshold."""
+
+    if semantic_score is None:
+        return 0.0
+
+    normalized_score = min(
+        1.0,
+        max(
+            0.0,
+            float(semantic_score),
+        ),
+    )
+
+    if normalized_score < minimum_score:
+        return 0.0
+
+    if math.isclose(
+        minimum_score,
+        1.0,
+    ):
+        return (
+            1.0
+            if math.isclose(
+                normalized_score,
+                1.0,
+            )
+            else 0.0
+        )
+
+    return min(
+        1.0,
+        max(
+            0.0,
+            (
+                normalized_score
+                - minimum_score
+            )
+            / (
+                1.0
+                - minimum_score
+            ),
+        ),
+    )
+
+
 class PostSearchService:
     """Coordinate recall, filtering, ranking, and result assembly."""
 
     def __init__(
         self,
         repository: PostRepository = post_repository,
+        semantic_recaller: SemanticRecaller | None = None,
+        *,
+        semantic_weight: float = 0.0,
+        semantic_zero_text_min_score: float = 0.0,
     ) -> None:
+        _validate_semantic_ranking_parameters(
+            semantic_weight=semantic_weight,
+            semantic_zero_text_min_score=(
+                semantic_zero_text_min_score
+            ),
+        )
+
         self._repository = repository
+        self._semantic_recaller = semantic_recaller
+        self._semantic_weight = float(
+            semantic_weight
+        )
+        self._semantic_zero_text_min_score = float(
+            semantic_zero_text_min_score
+        )
 
     async def search(
         self,
@@ -243,29 +345,143 @@ class PostSearchService:
                 request.radius_km,
             )
 
-        candidates = await self._repository.search_candidates(
-            category=request.category,
-            visible_statuses=request.visible_statuses,
-            city=request.city,
-            district=request.district,
-            min_latitude=bounding_box["min_latitude"],
-            max_latitude=bounding_box["max_latitude"],
-            min_longitude=bounding_box["min_longitude"],
-            max_longitude=bounding_box["max_longitude"],
-            limit=request.recall_k,
+        degradation_reasons: list[str] = []
+
+        freshness_candidates = (
+            await self._repository.search_candidates(
+                category=request.category,
+                visible_statuses=request.visible_statuses,
+                city=request.city,
+                district=request.district,
+                min_latitude=bounding_box[
+                    "min_latitude"
+                ],
+                max_latitude=bounding_box[
+                    "max_latitude"
+                ],
+                min_longitude=bounding_box[
+                    "min_longitude"
+                ],
+                max_longitude=bounding_box[
+                    "max_longitude"
+                ],
+                limit=request.recall_k,
+            )
         )
+
+        semantic_candidates: list[
+            dict[str, Any]
+        ] = []
+
+        if self._semantic_recaller is not None:
+            try:
+                semantic_candidates = list(
+                    await self._semantic_recaller(
+                        request
+                    )
+                )
+            except Exception as exc:
+                degradation_reasons.append(
+                    "Semantic recall unavailable: "
+                    f"{type(exc).__name__}"
+                )
+
+        merged_candidates = merge_recall_candidates(
+            freshness_candidates=(
+                freshness_candidates
+            ),
+            semantic_candidates=semantic_candidates,
+        )
+
+        source_keys = [
+            (
+                candidate["source"],
+                candidate["source_id"],
+            )
+            for candidate in merged_candidates
+        ]
+
+        try:
+            hydrated_rows = (
+                await self._repository.fetch_by_source_keys(
+                    source_keys
+                )
+            )
+            hydrated_candidates = (
+                hydrate_recall_candidates(
+                    merged_candidates,
+                    hydrated_rows,
+                )
+            )
+        except Exception as exc:
+            degradation_reasons.append(
+                "Candidate hydration unavailable: "
+                f"{type(exc).__name__}"
+            )
+
+            freshness_only = merge_recall_candidates(
+                freshness_candidates=(
+                    freshness_candidates
+                ),
+                semantic_candidates=[],
+            )
+            hydrated_candidates = (
+                hydrate_recall_candidates(
+                    freshness_only,
+                    freshness_candidates,
+                )
+            )
 
         scored_candidates: list[dict[str, Any]] = []
 
-        for row in candidates:
+        for recalled_candidate in hydrated_candidates:
+            row = recalled_candidate["row"]
+            semantic_score = recalled_candidate[
+                "semantic_score"
+            ]
+
             (
                 text_score,
-                recall_sources,
+                lexical_recall_sources,
                 reasons,
-            ) = _calculate_text_score(request.query, row)
+            ) = _calculate_text_score(
+                request.query,
+                row,
+            )
 
-            if text_score <= 0:
+            recall_sources = list(
+                dict.fromkeys(
+                    [
+                        *recalled_candidate[
+                            "recall_sources"
+                        ],
+                        *lexical_recall_sources,
+                    ]
+                )
+            )
+
+            semantic_ranking_score = (
+                _semantic_ranking_score(
+                    semantic_score,
+                    minimum_score=(
+                        self
+                        ._semantic_zero_text_min_score
+                    ),
+                )
+            )
+
+            semantic_ranking_enabled = (
+                self._semantic_weight > 0
+            )
+
+            if text_score <= 0 and (
+                not semantic_ranking_enabled
+                or semantic_ranking_score <= 0
+            ):
                 continue
+
+            if semantic_score is not None:
+                reasons.append("语义相关")
 
             distance_km: float | None = None
             geo_score = 0.0
@@ -329,6 +545,10 @@ class PostSearchService:
                 {
                     "row": row,
                     "text_score": text_score,
+                    "semantic_score": semantic_score,
+                    "semantic_ranking_score": (
+                        semantic_ranking_score
+                    ),
                     "geo_score": min(1.0, geo_score),
                     "distance_km": distance_km,
                     "hot_raw": _static_hot_raw(row),
@@ -339,8 +559,6 @@ class PostSearchService:
                 }
             )
 
-        degraded = False
-        degraded_reason: str | None = None
         realtime_features: dict[str, dict[str, int]] = {}
 
         if scored_candidates:
@@ -354,8 +572,7 @@ class PostSearchService:
                     await get_post_realtime_features(source_ids)
                 )
             except Exception as exc:
-                degraded = True
-                degraded_reason = (
+                degradation_reasons.append(
                     "Redis realtime features unavailable: "
                     f"{type(exc).__name__}"
                 )
@@ -449,6 +666,11 @@ class PostSearchService:
                 "hot": 0.15,
             }
 
+            if self._semantic_weight > 0:
+                weights["semantic"] = (
+                    self._semantic_weight
+                )
+
             if request_has_geo:
                 weights["geo"] = 0.25
 
@@ -459,6 +681,14 @@ class PostSearchService:
                 weights["text"] * candidate["text_score"]
                 + weights["hot"] * hot_score
             )
+
+            if "semantic" in weights:
+                weighted_sum += (
+                    weights["semantic"]
+                    * candidate[
+                        "semantic_ranking_score"
+                    ]
+                )
 
             if "geo" in weights:
                 weighted_sum += (
@@ -480,6 +710,9 @@ class PostSearchService:
             key=lambda candidate: (
                 -candidate["final_score"],
                 -candidate["text_score"],
+                -candidate[
+                    "semantic_ranking_score"
+                ],
                 (
                     candidate["distance_km"]
                     if candidate["distance_km"] is not None
@@ -515,7 +748,16 @@ class PostSearchService:
                     candidate["text_score"],
                     6,
                 ),
-                semantic_score=None,
+                semantic_score=(
+                    round(
+                        candidate["semantic_score"],
+                        6,
+                    )
+                    if candidate[
+                        "semantic_score"
+                    ] is not None
+                    else None
+                ),
                 bm25_score=None,
                 geo_score=round(
                     candidate["geo_score"],
@@ -535,10 +777,21 @@ class PostSearchService:
             for candidate in selected
         ]
 
+        degraded = bool(
+            degradation_reasons
+        )
+        degraded_reason = (
+            "; ".join(degradation_reasons)
+            if degradation_reasons
+            else None
+        )
+
         return PostSearchResponse(
             request_id=uuid4().hex,
             query=request.query,
-            total_candidates=len(candidates),
+            total_candidates=len(
+                hydrated_candidates
+            ),
             result_count=len(items),
             items=items,
             degraded=degraded,
@@ -546,4 +799,6 @@ class PostSearchService:
         )
 
 
+# Semantic recall remains opt-in until BM25 or a stronger
+# reranking stage can safely control semantic-only candidates.
 post_search_service = PostSearchService()
