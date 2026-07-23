@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate global semantic recall through PostgreSQL HNSW."""
+"""Evaluate global or business-filtered semantic recall through PostgreSQL HNSW."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from app.search.embedding import (
 from app.search.semantic_retrieval import (
     MAX_EF_SEARCH,
     MAX_RECALL_LIMIT,
+    semantic_search_filtered,
     semantic_search_global,
 )
 from scripts.evaluate_post_search import (
@@ -41,8 +42,15 @@ DEFAULT_CASES_PATH = Path(
 DEFAULT_OUTPUT_PATH = Path(
     "data/evaluation/results/semantic_global.json"
 )
+DEFAULT_FILTERED_OUTPUT_PATH = Path(
+    "data/evaluation/results/semantic_filtered.json"
+)
 DEFAULT_CUTOFFS = (20, 50, 100, 200, 500)
 DEFAULT_EF_SEARCH_VALUES = (40, 100, 200)
+# Filtered HNSW evaluation must return a complete candidate set.
+# iterative_scan=off may return fewer rows after SQL filtering.
+DEFAULT_ITERATIVE_SCAN = "strict_order"
+DEFAULT_RADIUS_OVERFETCH_FACTOR = 2.0
 
 
 def normalize_positive_values(
@@ -326,8 +334,76 @@ def build_experiment_summary(
             ),
         }
 
+    returned_counts: list[int] = []
+
+    for result in case_results:
+        returned_count = result.get(
+            "returned_count"
+        )
+
+        if returned_count is None:
+            cutoff_metrics = result.get(
+                "metrics",
+                {},
+            )
+
+            returned_count = next(
+                (
+                    metric.get(
+                        "returned_count"
+                    )
+                    for metric in (
+                        cutoff_metrics.values()
+                    )
+                    if metric.get(
+                        "returned_count"
+                    ) is not None
+                ),
+                None,
+            )
+
+        if returned_count is None:
+            raise ValueError(
+                "case result must include "
+                "returned_count"
+            )
+
+        returned_counts.append(
+            int(returned_count)
+        )
+
     return {
         "case_count": len(case_results),
+        "returned_count": {
+            "count": len(returned_counts),
+            "min": (
+                min(returned_counts)
+                if returned_counts
+                else None
+            ),
+            "mean": (
+                round(
+                    statistics.fmean(
+                        returned_counts
+                    ),
+                    3,
+                )
+                if returned_counts
+                else None
+            ),
+            "p50": round_optional(
+                percentile(
+                    returned_counts,
+                    50,
+                ),
+                3,
+            ),
+            "max": (
+                max(returned_counts)
+                if returned_counts
+                else None
+            ),
+        },
         "cutoffs": cutoff_summary,
         "database_latency_ms": latency_summary(
             [
@@ -344,17 +420,112 @@ def build_experiment_summary(
     }
 
 
-async def evaluate_global(
+def case_category_value(
+    case: EvaluationCase,
+) -> str | None:
+    """Return the plain category value used by PostgreSQL."""
+
+    if case.category is None:
+        return None
+
+    value = getattr(
+        case.category,
+        "value",
+        case.category,
+    )
+
+    return str(value)
+
+
+def case_filter_configuration(
+    case: EvaluationCase,
+) -> dict[str, Any]:
+    """Serialize the filters applied to one evaluation case."""
+
+    return {
+        "category": case_category_value(case),
+        "visible_statuses": list(
+            case.visible_statuses
+        ),
+        "city": case.city,
+        "district": case.district,
+        "latitude": case.latitude,
+        "longitude": case.longitude,
+        "radius_km": case.radius_km,
+    }
+
+
+async def retrieve_semantic_candidates(
+    connection: Any,
     *,
+    mode: str,
+    case: EvaluationCase,
+    query_embedding: Any,
+    limit: int,
+    ef_search: int,
+    iterative_scan: str = DEFAULT_ITERATIVE_SCAN,
+    radius_overfetch_factor: float = (
+        DEFAULT_RADIUS_OVERFETCH_FACTOR
+    ),
+) -> list[dict[str, Any]]:
+    """Dispatch one case to global or filtered semantic recall."""
+
+    if mode == "global":
+        return await semantic_search_global(
+            connection,
+            query_embedding=query_embedding,
+            limit=limit,
+            ef_search=ef_search,
+        )
+
+    if mode == "filtered":
+        return await semantic_search_filtered(
+            connection,
+            query_embedding=query_embedding,
+            category=case_category_value(case),
+            visible_statuses=case.visible_statuses,
+            city=case.city,
+            district=case.district,
+            latitude=case.latitude,
+            longitude=case.longitude,
+            radius_km=case.radius_km,
+            radius_overfetch_factor=(
+                radius_overfetch_factor
+            ),
+            limit=limit,
+            ef_search=ef_search,
+            iterative_scan=iterative_scan,
+        )
+
+    raise ValueError(
+        f"unsupported semantic evaluation mode: {mode}"
+    )
+
+
+async def evaluate_mode(
+    *,
+    mode: str,
     cases: Sequence[EvaluationCase],
     model: Any,
     cutoffs: Sequence[int],
     ef_search_values: Sequence[int],
+    iterative_scan: str = DEFAULT_ITERATIVE_SCAN,
+    radius_overfetch_factor: float = (
+        DEFAULT_RADIUS_OVERFETCH_FACTOR
+    ),
 ) -> tuple[
     list[dict[str, Any]],
     list[float],
 ]:
-    """Evaluate all cases for every HNSW ef_search setting."""
+    """Evaluate all cases under one semantic recall mode."""
+
+    if mode not in {
+        "global",
+        "filtered",
+    }:
+        raise ValueError(
+            f"unsupported semantic evaluation mode: {mode}"
+        )
 
     max_cutoff = max(cutoffs)
 
@@ -395,11 +566,19 @@ async def evaluate_global(
                     time.perf_counter()
                 )
 
-                candidates = await semantic_search_global(
-                    connection,
-                    query_embedding=embedding,
-                    limit=max_cutoff,
-                    ef_search=ef_search,
+                candidates = (
+                    await retrieve_semantic_candidates(
+                        connection,
+                        mode=mode,
+                        case=case,
+                        query_embedding=embedding,
+                        limit=max_cutoff,
+                        ef_search=ef_search,
+                        iterative_scan=iterative_scan,
+                        radius_overfetch_factor=(
+                            radius_overfetch_factor
+                        ),
+                    )
                 )
 
                 database_ms = (
@@ -408,7 +587,7 @@ async def evaluate_global(
                 ) * 1000.0
 
                 returned_source_ids = [
-                    candidate["source_id"]
+                    str(candidate["source_id"])
                     for candidate in candidates
                 ]
 
@@ -416,6 +595,13 @@ async def evaluate_global(
                     {
                         "case_id": case.case_id,
                         "query": case.query,
+                        "mode": mode,
+                        "filters": (
+                            case_filter_configuration(
+                                case
+                            )
+                        ),
+                        "requested_limit": max_cutoff,
                         "binary_relevance_threshold": (
                             case.binary_relevance_threshold
                         ),
@@ -469,7 +655,18 @@ async def evaluate_global(
 
             experiments.append(
                 {
+                    "mode": mode,
                     "ef_search": ef_search,
+                    "iterative_scan": (
+                        iterative_scan
+                        if mode == "filtered"
+                        else None
+                    ),
+                    "radius_overfetch_factor": (
+                        radius_overfetch_factor
+                        if mode == "filtered"
+                        else None
+                    ),
                     "summary": (
                         build_experiment_summary(
                             case_results,
@@ -481,6 +678,27 @@ async def evaluate_global(
             )
 
     return experiments, encoder_latencies
+
+
+async def evaluate_global(
+    *,
+    cases: Sequence[EvaluationCase],
+    model: Any,
+    cutoffs: Sequence[int],
+    ef_search_values: Sequence[int],
+) -> tuple[
+    list[dict[str, Any]],
+    list[float],
+]:
+    """Backward-compatible global evaluation wrapper."""
+
+    return await evaluate_mode(
+        mode="global",
+        cases=cases,
+        model=model,
+        cutoffs=cutoffs,
+        ef_search_values=ef_search_values,
+    )
 
 
 def positive_int(value: str) -> int:
@@ -496,12 +714,26 @@ def positive_int(value: str) -> int:
     return parsed
 
 
+def overfetch_factor(value: str) -> float:
+    """Parse a radius over-fetch factor of at least one."""
+
+    parsed = float(value)
+
+    if parsed < 1.0:
+        raise argparse.ArgumentTypeError(
+            "value must be greater than or equal to 1.0"
+        )
+
+    return parsed
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
 
     parser = argparse.ArgumentParser(
         description=(
-            "Evaluate global BGE + pgvector HNSW recall."
+            "Evaluate global or business-filtered "
+            "BGE + pgvector HNSW recall."
         )
     )
 
@@ -534,13 +766,23 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--mode",
-        choices=("global",),
+        choices=("global", "filtered"),
         default="global",
+    )
+    parser.add_argument(
+        "--iterative-scan",
+        choices=("off", "strict_order"),
+        default=DEFAULT_ITERATIVE_SCAN,
+    )
+    parser.add_argument(
+        "--radius-overfetch-factor",
+        type=overfetch_factor,
+        default=DEFAULT_RADIUS_OVERFETCH_FACTOR,
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=DEFAULT_OUTPUT_PATH,
+        default=None,
     )
 
     return parser.parse_args()
@@ -561,6 +803,15 @@ async def async_main(
         name="ef_search",
         maximum=MAX_EF_SEARCH,
     )
+
+    output_path = args.output
+
+    if output_path is None:
+        output_path = (
+            DEFAULT_FILTERED_OUTPUT_PATH
+            if args.mode == "filtered"
+            else DEFAULT_OUTPUT_PATH
+        )
 
     model_path = args.model_path.resolve()
 
@@ -583,6 +834,22 @@ async def async_main(
     print("device:", device)
     print("cutoffs:", cutoffs)
     print("ef_search:", ef_search_values)
+    print(
+        "iterative_scan:",
+        (
+            args.iterative_scan
+            if args.mode == "filtered"
+            else None
+        ),
+    )
+    print(
+        "radius_overfetch_factor:",
+        (
+            args.radius_overfetch_factor
+            if args.mode == "filtered"
+            else None
+        ),
+    )
 
     model_started_at = time.perf_counter()
 
@@ -605,11 +872,16 @@ async def async_main(
     ) * 1000.0
 
     experiments, encoder_latencies = (
-        await evaluate_global(
+        await evaluate_mode(
+            mode=args.mode,
             cases=cases,
             model=model,
             cutoffs=cutoffs,
             ef_search_values=ef_search_values,
+            iterative_scan=args.iterative_scan,
+            radius_overfetch_factor=(
+                args.radius_overfetch_factor
+            ),
         )
     )
 
@@ -617,14 +889,25 @@ async def async_main(
         "generated_at_utc": datetime.now(
             UTC
         ).isoformat(),
-        "mode": "global",
+        "mode": args.mode,
         "configuration": {
+            "mode": args.mode,
             "cases": str(args.cases),
             "model_path": str(model_path),
             "device": device,
             "cutoffs": cutoffs,
             "ef_search_values": ef_search_values,
             "maximum_recall_limit": max(cutoffs),
+            "iterative_scan": (
+                args.iterative_scan
+                if args.mode == "filtered"
+                else None
+            ),
+            "radius_overfetch_factor": (
+                args.radius_overfetch_factor
+                if args.mode == "filtered"
+                else None
+            ),
         },
         "model": {
             "dimension": (
@@ -645,11 +928,11 @@ async def async_main(
         "experiments": experiments,
     }
 
-    args.output.parent.mkdir(
+    output_path.parent.mkdir(
         parents=True,
         exist_ok=True,
     )
-    args.output.write_text(
+    output_path.write_text(
         json.dumps(
             report,
             ensure_ascii=False,
@@ -669,6 +952,22 @@ async def async_main(
         print(
             "\nef_search:",
             experiment["ef_search"],
+        )
+        print(
+            "iterative_scan:",
+            experiment["iterative_scan"],
+        )
+        print(
+            "radius_overfetch_factor:",
+            experiment[
+                "radius_overfetch_factor"
+            ],
+        )
+        print(
+            "returned_count:",
+            experiment["summary"][
+                "returned_count"
+            ],
         )
         print(
             "database_latency_ms:",
@@ -703,7 +1002,7 @@ async def async_main(
                 metrics["grade3_hit_rate"],
             )
 
-    print("\noutput:", args.output)
+    print("\noutput:", output_path)
 
     return report
 
