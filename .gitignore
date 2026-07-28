@@ -64,3 +64,6 @@ data/evaluation/results/
 
 # Unfinished manual search annotations
 data/evaluation/annotation_work/
+
+# Local embedding model assets
+/models/
