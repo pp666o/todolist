@@ -26,7 +26,20 @@ ENV_FILE="${ROOT_DIR}/.env"
 PYTHON_BIN="${ROOT_DIR}/.venv/bin/python"
 
 POSTGRES_CONTAINER="geo-postgres"
-POST_SOURCE="mysql_tiezi_geo_new"
+
+mysql_post_source() {
+  local python_exec="${PYTHON_BIN}"
+
+  if [[ ! -x "${python_exec}" ]]; then
+    python_exec="python3"
+  fi
+
+  PYTHONPATH="${ROOT_DIR}" \
+    "${python_exec}" - <<'PY'
+from app.services.mysql_post_mapper import get_mysql_post_source
+print(get_mysql_post_source())
+PY
+}
 
 MODEL_REPO="BAAI/bge-small-zh-v1.5"
 MODEL_PATH="${ROOT_DIR}/models/bge-small-zh-v1.5"
@@ -512,13 +525,15 @@ restore_posts() {
 
   local remote_count
   local postgres_count
+  local post_source
 
+  post_source="$(mysql_post_source)"
   remote_count="$(read_remote_mysql_count)"
   postgres_count="$(
     postgres_scalar "
       SELECT COUNT(*)
       FROM posts
-      WHERE source = '${POST_SOURCE}';
+      WHERE source = '${post_source}';
     "
   )"
 
@@ -571,11 +586,12 @@ restore_embeddings() {
   local embedded_count
   local missing_count
 
+  local post_source="$(mysql_post_source)"
   total_count="$(
     postgres_scalar "
       SELECT COUNT(*)
       FROM posts
-      WHERE source = '${POST_SOURCE}';
+      WHERE source = '${post_source}';
     "
   )"
 
@@ -583,7 +599,7 @@ restore_embeddings() {
     postgres_scalar "
       SELECT COUNT(embedding)
       FROM posts
-      WHERE source = '${POST_SOURCE}';
+      WHERE source = '${post_source}';
     "
   )"
 
@@ -591,7 +607,7 @@ restore_embeddings() {
     postgres_scalar "
       SELECT COUNT(*)
       FROM posts
-      WHERE source = '${POST_SOURCE}'
+      WHERE source = '${post_source}'
         AND embedding IS NULL;
     "
   )"
@@ -609,13 +625,14 @@ restore_embeddings() {
 
   # build_post_embeddings.py 只读取 embedding IS NULL 的记录，
   # 已经提交的批次不会重复计算，因此支持安全断点续跑。
+  local post_source="$(mysql_post_source)"
   PYTHONPATH="${ROOT_DIR}" \
   "${PYTHON_BIN}" \
     "${ROOT_DIR}/scripts/build_post_embeddings.py" \
     --model-path "${MODEL_PATH}" \
     --batch-size "${EMBEDDING_BATCH_SIZE}" \
     --device auto \
-    --source "${POST_SOURCE}"
+    --source "${post_source}"
 }
 
 
@@ -624,7 +641,9 @@ show_asset_summary() {
 
   local postgres_user
   local postgres_db
+  local post_source
 
+  post_source="$(mysql_post_source)"
   postgres_user="$(read_env_value POSTGRES_USER)"
   postgres_db="$(read_env_value POSTGRES_DB)"
 
@@ -649,7 +668,7 @@ show_asset_summary() {
                     <> ${EMBEDDING_DIMENSION}
           ) AS invalid_dimensions
       FROM posts
-      WHERE source = '${POST_SOURCE}';
+      WHERE source = '${post_source}';
     " \
     -c "
       SELECT
@@ -658,7 +677,7 @@ show_asset_summary() {
           MIN(vector_norm(embedding)) AS min_norm,
           MAX(vector_norm(embedding)) AS max_norm
       FROM posts
-      WHERE source = '${POST_SOURCE}'
+      WHERE source = '${post_source}'
         AND embedding IS NOT NULL
       GROUP BY vector_dims(embedding);
     " \

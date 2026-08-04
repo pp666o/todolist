@@ -24,6 +24,7 @@ from app.infrastructure.postgres import connect_postgres
 from app.repositories.post_repository import post_repository
 from app.services.mysql_post_mapper import (
     MYSQL_POST_SOURCE,
+    get_mysql_post_source,
     map_mysql_post_row,
 )
 
@@ -133,7 +134,7 @@ async def read_postgres_summary() -> dict[str, Any]:
                 FROM posts
                 WHERE source = %s
                 """,
-                (MYSQL_POST_SOURCE,),
+                (get_mysql_post_source(),),
             )
             summary = await cursor.fetchone()
 
@@ -145,7 +146,7 @@ async def read_postgres_summary() -> dict[str, Any]:
                 GROUP BY category
                 ORDER BY category
                 """,
-                (MYSQL_POST_SOURCE,),
+                (get_mysql_post_source(),),
             )
             category_rows = await cursor.fetchall()
 
@@ -157,7 +158,7 @@ async def read_postgres_summary() -> dict[str, Any]:
                 GROUP BY visible_status
                 ORDER BY visible_status
                 """,
-                (MYSQL_POST_SOURCE,),
+                (get_mysql_post_source(),),
             )
             status_rows = await cursor.fetchall()
 
@@ -190,7 +191,7 @@ async def read_postgres_max_source_id() -> int:
                 WHERE source = %s
                   AND source_id ~ '^[0-9]+$'
                 """,
-                (MYSQL_POST_SOURCE,),
+                (get_mysql_post_source(),),
             )
             row = await cursor.fetchone()
 
@@ -372,10 +373,10 @@ def load_checkpoint(path: Path) -> dict[str, Any]:
             f"{payload.get('version')!r}"
         )
 
-    if payload.get("source") != MYSQL_POST_SOURCE:
+    if payload.get("source") != get_mysql_post_source():
         raise ValueError(
             "Synchronization checkpoint source does not match "
-            f"{MYSQL_POST_SOURCE!r}."
+            f"{get_mysql_post_source()!r}."
         )
 
     try:
@@ -444,7 +445,7 @@ def build_checkpoint(
     """Build a serializable synchronization checkpoint."""
     payload: dict[str, Any] = {
         "version": CHECKPOINT_VERSION,
-        "source": MYSQL_POST_SOURCE,
+        "source": get_mysql_post_source(),
         "status": status,
         "initial_after_id": initial_after_id,
         "last_source_id": last_source_id,

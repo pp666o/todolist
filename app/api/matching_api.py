@@ -1,10 +1,16 @@
 from fastapi import APIRouter, HTTPException, Query, Body, Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 import datetime
 import asyncio
 from app.core.user_matching_engine import UserMatchingEngine
-from app.utils.data_loader import load_data_from_files, add_interactions_to_engine, format_user_id
+from app.infrastructure.postgres import connect_postgres
+from app.utils.data_loader import (
+    load_data_from_files,
+    load_user_profiles_from_postgres,
+    add_interactions_to_engine,
+    format_user_id,
+)
 
 router = APIRouter(prefix="/matching", tags=["matching"])
 
@@ -18,12 +24,23 @@ async def load_engine_data():
 
     # 使用共享数据加载模块
     users_data, items_data, interactions_data = await load_data_from_files()
+    postgres_user_profiles = await load_user_profiles_from_postgres()
 
-    print(f"--- [API Startup] 加载到匹配引擎中: {len(users_data)}用户, {len(items_data)}物品, {len(interactions_data)}交互 ---")
+    print(
+        f"--- [API Startup] 加载到匹配引擎中: {len(users_data)}本地用户, "
+        f"{len(postgres_user_profiles)} PostgreSQL 用户画像, "
+        f"{len(items_data)}物品, {len(interactions_data)}交互 ---"
+    )
     try:
+        if postgres_user_profiles:
+            matching_engine.add_batch_user_profiles(postgres_user_profiles)
+            print(
+                f"--- [API Startup] 添加 {len(postgres_user_profiles)} PostgreSQL 用户画像到匹配引擎 ---"
+            )
+
         if users_data:
             matching_engine.add_batch_user_profiles(users_data)
-            print(f"--- [API Startup] 添加 {len(users_data)} 用户到匹配引擎 ---")
+            print(f"--- [API Startup] 添加 {len(users_data)} 本地用户到匹配引擎 ---")
         
         if items_data:
             matching_engine.add_batch_item_profiles(items_data)

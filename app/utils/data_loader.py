@@ -2,6 +2,9 @@ import json
 from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional
 
+from app.infrastructure.postgres import connect_postgres
+
+
 def format_user_id(user_id: str) -> str:
     """
     格式化用户ID，确保符合数据库中存储的格式
@@ -65,6 +68,102 @@ async def load_data_from_files() -> Tuple[List[Dict], List[Dict], List[Dict]]:
     print(f"--- [Data Loader] 数据加载完成: {len(users_data)} 用户, {len(items_data)} 物品, {len(interactions_data)} 交互 ---")
     
     return users_data, items_data, interactions_data
+
+
+def _age_bucket_to_numeric(age_bucket: Optional[str]) -> int | None:
+    if age_bucket is None:
+        return None
+
+    mapping = {
+        "18-24": 21,
+        "25-34": 29,
+        "35-44": 39,
+        "45-54": 49,
+        "55-64": 59,
+        "65+": 70,
+        "unknown": None,
+    }
+
+    return mapping.get(age_bucket)
+
+
+async def load_user_profiles_from_postgres() -> List[Dict[str, Any]]:
+    """Load user profiles from PostgreSQL and normalize them for the matching engine."""
+    async with await connect_postgres() as connection:
+        async with connection.cursor() as cursor:
+            await cursor.execute(
+                """
+                SELECT
+                    source_user_id,
+                    source,
+                    age_bucket,
+                    job,
+                    education,
+                    hobby_tags,
+                    character_tag,
+                    user_level,
+                    country,
+                    province,
+                    city,
+                    district,
+                    school,
+                    authored_post_count,
+                    category_weights,
+                    tag_weights,
+                    avg_likes,
+                    avg_views,
+                    avg_marks,
+                    avg_dislikes,
+                    avg_rate_score,
+                    last_authored_at,
+                    profile_version,
+                    source_updated_at,
+                    synced_at
+                FROM public.user_profiles
+                """,
+            )
+            rows = await cursor.fetchall()
+
+    profiles: List[Dict[str, Any]] = []
+
+    for row in rows:
+        source_user_id = row.get("source_user_id")
+        if source_user_id is None:
+            continue
+
+        user_id = format_user_id(str(source_user_id))
+        profile: Dict[str, Any] = {
+            "user_id": user_id,
+            "source": row.get("source"),
+            "age_bucket": row.get("age_bucket"),
+            "age": _age_bucket_to_numeric(row.get("age_bucket")),
+            "job": row.get("job"),
+            "education": row.get("education"),
+            "hobby_tags": row.get("hobby_tags") or [],
+            "character_tag": row.get("character_tag"),
+            "user_level": row.get("user_level"),
+            "country": row.get("country"),
+            "province": row.get("province"),
+            "city": row.get("city"),
+            "district": row.get("district"),
+            "school": row.get("school"),
+            "authored_post_count": row.get("authored_post_count"),
+            "category_weights": row.get("category_weights") or {},
+            "tag_weights": row.get("tag_weights") or {},
+            "avg_likes": row.get("avg_likes"),
+            "avg_views": row.get("avg_views"),
+            "avg_marks": row.get("avg_marks"),
+            "avg_dislikes": row.get("avg_dislikes"),
+            "avg_rate_score": row.get("avg_rate_score"),
+            "last_authored_at": row.get("last_authored_at"),
+            "profile_version": row.get("profile_version"),
+            "source_updated_at": row.get("source_updated_at"),
+            "synced_at": row.get("synced_at"),
+        }
+        profiles.append(profile)
+
+    return profiles
+
 
 def add_interactions_to_engine(engine: Any, interactions_data: List[Dict]) -> int:
     """

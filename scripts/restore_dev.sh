@@ -9,12 +9,14 @@ PERSIST_ENV="${HOME}/.config/geo-post-search/env"
 POSTGRES_COMPOSE_FILE="${ROOT_DIR}/compose.postgres.yml"
 POSTGRES_CONTAINER="geo-postgres"
 MIGRATIONS_DIR="${ROOT_DIR}/db/migrations"
+PYTHON_BIN="${ROOT_DIR}/.venv/bin/python"
 
 CONFIGURE_REMOTE_SCRIPT="${ROOT_DIR}/scripts/configure_remote_sources.sh"
 START_DEV_SCRIPT="${ROOT_DIR}/scripts/start_dev.sh"
 
 INFRA_ONLY=0
 SKIP_SYNC=0
+SKIP_USER_PROFILE_SYNC=0
 RECONFIGURE=0
 
 
@@ -38,6 +40,7 @@ Options:
   --infra-only    Restore infrastructure, but do not start FastAPI/Vite.
   --skip-sync     Do not bootstrap posts from MySQL.
   --reconfigure   Re-detect MySQL and rewrite remote source configuration.
+  --skip-user-profiles  Skip MySQL user profile synchronization.
   -h, --help      Show this help.
 EOF
 }
@@ -50,6 +53,9 @@ while (($# > 0)); do
       ;;
     --skip-sync)
       SKIP_SYNC=1
+      ;;
+    --skip-user-profiles)
+      SKIP_USER_PROFILE_SYNC=1
       ;;
     --reconfigure)
       RECONFIGURE=1
@@ -697,6 +703,14 @@ bootstrap_posts() {
     "${restore_args[@]}"
 }
 
+mysql_post_source() {
+  PYTHONPATH="${ROOT_DIR}" \
+    "${PYTHON_BIN}" - <<'PY'
+from app.services.mysql_post_mapper import get_mysql_post_source
+print(get_mysql_post_source())
+PY
+}
+
 show_summary() {
   log "恢复结果"
 
@@ -704,9 +718,11 @@ show_summary() {
   local postgres_db
   local redis_host
   local redis_port
+  local source_name
 
   postgres_user="$(read_env_value POSTGRES_USER)"
   postgres_db="$(read_env_value POSTGRES_DB)"
+  source_name="$(mysql_post_source)"
 
   docker exec "${POSTGRES_CONTAINER}" \
     psql \
@@ -720,7 +736,7 @@ show_summary() {
           WHERE embedding IS NOT NULL
         ) AS embedded_count
       FROM posts
-      WHERE source = 'mysql_tiezi_geo_new';
+      WHERE source = '${source_name}';
     "
 
   redis_host="$(
@@ -777,6 +793,7 @@ main() {
   apply_migrations
   ensure_redis_tunnel
   bootstrap_posts
+  bootstrap_user_profiles
   show_summary
 
   if ((INFRA_ONLY == 1)); then
@@ -787,6 +804,20 @@ main() {
   log "启动开发服务"
 
   bash "${START_DEV_SCRIPT}"
+}
+
+bootstrap_user_profiles() {
+  if ((SKIP_USER_PROFILE_SYNC == 1)); then
+    log "跳过用户画像同步"
+    return
+  fi
+
+  log "执行 MySQL 用户画像同步"
+
+  PYTHONPATH="${ROOT_DIR}" \
+  "${PYTHON_BIN}" \
+    "${ROOT_DIR}/scripts/sync_mysql_user_profiles.py" \
+    --batch-size 1000
 }
 
 
