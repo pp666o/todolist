@@ -348,7 +348,11 @@ async def run_async_with_retry(
     raise RuntimeError("Unreachable asynchronous retry state.")
 
 
-def load_checkpoint(path: Path) -> dict[str, Any]:
+def load_checkpoint(
+    path: Path,
+    *,
+    expected_source: str = MYSQL_POST_SOURCE,
+) -> dict[str, Any]:
     """Load and validate a synchronization checkpoint."""
     if not path.exists():
         raise FileNotFoundError(
@@ -373,10 +377,10 @@ def load_checkpoint(path: Path) -> dict[str, Any]:
             f"{payload.get('version')!r}"
         )
 
-    if payload.get("source") != get_mysql_post_source():
+    if payload.get("source") != expected_source:
         raise ValueError(
             "Synchronization checkpoint source does not match "
-            f"{get_mysql_post_source()!r}."
+            f"{expected_source!r}."
         )
 
     try:
@@ -432,6 +436,7 @@ def remove_checkpoint(path: Path) -> None:
 
 def build_checkpoint(
     *,
+    source: str = MYSQL_POST_SOURCE,
     status: str,
     initial_after_id: int,
     last_source_id: int,
@@ -445,7 +450,7 @@ def build_checkpoint(
     """Build a serializable synchronization checkpoint."""
     payload: dict[str, Any] = {
         "version": CHECKPOINT_VERSION,
-        "source": get_mysql_post_source(),
+        "source": source,
         "status": status,
         "initial_after_id": initial_after_id,
         "last_source_id": last_source_id,
@@ -469,6 +474,7 @@ def resolve_after_id(
     after_id: int,
     resume: bool,
     checkpoint_path: Path | None,
+    source: str = MYSQL_POST_SOURCE,
 ) -> int:
     """Resolve the initial cursor from CLI input or checkpoint."""
     if not resume:
@@ -484,7 +490,10 @@ def resolve_after_id(
             "--resume cannot be combined with a non-zero --after-id."
         )
 
-    checkpoint = load_checkpoint(checkpoint_path)
+    checkpoint = load_checkpoint(
+        checkpoint_path,
+        expected_source=source,
+    )
     resolved_after_id = int(checkpoint["last_source_id"])
 
     print("========== Resume checkpoint ==========")
@@ -505,6 +514,7 @@ async def resolve_starting_after_id(
     checkpoint_path: Path | None,
     max_retries: int,
     retry_backoff_seconds: float,
+    source: str = MYSQL_POST_SOURCE,
 ) -> int:
     """Resolve the starting source ID for a synchronization run."""
     if resume:
@@ -512,6 +522,7 @@ async def resolve_starting_after_id(
             after_id=after_id,
             resume=True,
             checkpoint_path=checkpoint_path,
+            source=source,
         )
 
     if mode == "append":
@@ -543,6 +554,7 @@ async def synchronize(
     checkpoint_path: Path | None = None,
     max_retries: int = DEFAULT_MAX_RETRIES,
     retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
+    source: str = MYSQL_POST_SOURCE,
 ) -> dict[str, Any]:
     """Read and upsert one or more deterministic MySQL batches."""
     validate_sync_parameters(
@@ -576,6 +588,7 @@ async def synchronize(
         write_checkpoint(
             checkpoint_path,
             build_checkpoint(
+                source=source,
                 status=status,
                 initial_after_id=after_id,
                 last_source_id=cursor_id,
@@ -980,6 +993,8 @@ def main() -> None:
 
     print("Selected synchronization mode:", args.mode)
 
+    source = get_mysql_post_source()
+
     try:
         resolved_after_id = asyncio.run(
             resolve_starting_after_id(
@@ -991,6 +1006,7 @@ def main() -> None:
                 retry_backoff_seconds=(
                     args.retry_backoff_seconds
                 ),
+                source=source,
             )
         )
     except (FileNotFoundError, ValueError) as exc:
@@ -1004,6 +1020,7 @@ def main() -> None:
             checkpoint_path=checkpoint_path,
             max_retries=args.max_retries,
             retry_backoff_seconds=args.retry_backoff_seconds,
+            source=source,
         )
     )
 
