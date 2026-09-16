@@ -9,6 +9,9 @@ from uuid import uuid4
 
 from app.infrastructure.redis import get_post_realtime_features
 from app.algorithms.search.text_relevance import calculate_text_score
+from app.algorithms.search.semantic_scoring import (
+    calibrate_semantic_score,
+)
 from app.repositories.post_repository import (
     PostRepository,
     post_repository,
@@ -62,54 +65,7 @@ class ScoredSearchCandidate(TypedDict, total=False):
     recall_sources: list[str]
     reasons: list[str]
 
-def semantic_ranking_score(
-    semantic_score: float | None,
-    *,
-    minimum_score: float,
-) -> float:
-    """Calibrate raw cosine similarity above one threshold."""
 
-    if semantic_score is None:
-        return 0.0
-
-    normalized_score = min(
-        1.0,
-        max(
-            0.0,
-            float(semantic_score),
-        ),
-    )
-
-    if normalized_score < minimum_score:
-        return 0.0
-
-    if math.isclose(
-        minimum_score,
-        1.0,
-    ):
-        return (
-            1.0
-            if math.isclose(
-                normalized_score,
-                1.0,
-            )
-            else 0.0
-        )
-
-    return min(
-        1.0,
-        max(
-            0.0,
-            (
-                normalized_score
-                - minimum_score
-            )
-            / (
-                1.0
-                - minimum_score
-            ),
-        ),
-    )
 def _validate_semantic_ranking_parameters(
     *,
     semantic_weight: float,
@@ -612,7 +568,7 @@ class PostSearchService:
             )
 
             semantic_ranking_score = (
-                _semantic_ranking_score(
+                calibrate_semantic_score(
                     semantic_score,
                     minimum_score=(
                         self
