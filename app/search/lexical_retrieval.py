@@ -11,7 +11,7 @@ from typing import Any, TypedDict
 
 from psycopg import AsyncConnection
 
-from todolist.app.algorithms.search.geo import haversine_km
+from app.algorithms.search.geo import haversine_km
 
 
 MAX_LEXICAL_LIMIT = 2000

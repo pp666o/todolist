@@ -7,14 +7,14 @@ from functools import lru_cache
 from typing import Any
 
 from app.infrastructure.postgres import connect_postgres
-from todolist.app.features.post_search.post_search import PostSearchRequest
+from app.features.post_search.post_search import PostSearchRequest
 from app.search.embedding import (
     DEFAULT_MODEL_PATH,
     encode_query,
     load_model,
     resolve_device,
 )
-from todolist.app.algorithms.search.geo import calculate_bounding_box
+from app.algorithms.search.geo import calculate_bounding_box
 from app.search.semantic_retrieval import (
     FilteredSemanticCandidate,
     semantic_search_filtered,

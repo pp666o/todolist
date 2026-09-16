@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from todolist.app.algorithms.search.geo import (
+from app.algorithms.search.geo import (
     EARTH_RADIUS_KM,
     calculate_bounding_box,
     haversine_km,

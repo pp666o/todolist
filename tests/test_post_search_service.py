@@ -5,9 +5,9 @@ from typing import Any
 
 import pytest
 
-from todolist.app.features.post_search.post_search import PostSearchRequest
-from todolist.app.features.post_search import post_search_service as service_module
-from todolist.app.features.post_search.post_search_service import PostSearchService
+from app.features.post_search.post_search import PostSearchRequest
+from app.features.post_search import post_search_service as service_module
+from app.features.post_search.post_search_service import PostSearchService
 
 
 class FakePostRepository:

@@ -13,16 +13,16 @@ from app.repositories.post_repository import (
     PostRepository,
     post_repository,
 )
-from todolist.app.features.post_search.post_search import (
+from app.features.post_search.post_search import (
     PostSearchHit,
     PostSearchRequest,
     PostSearchResponse,
 )
-from todolist.app.algorithms.search.candidate_merge import (
+from app.algorithms.search.candidate_merge import (
     hydrate_recall_candidates,
     merge_recall_candidates,
 )
-from todolist.app.algorithms.search.geo import (
+from app.algorithms.search.geo import (
     calculate_bounding_box as _calculate_bounding_box,
     haversine_km as _haversine_km,
 )

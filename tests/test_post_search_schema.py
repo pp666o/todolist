@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from todolist.app.features.post_search.post_search import PostSearchRequest
+from app.features.post_search.post_search import PostSearchRequest
 
 
 def test_query_is_trimmed() -> None:
