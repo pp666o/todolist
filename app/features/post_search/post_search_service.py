@@ -21,6 +21,11 @@ from app.features.post_search.post_search import (
     PostSearchRequest,
     PostSearchResponse,
 )
+from app.algorithms.search.popularity import (
+    calculate_realtime_hot_raw,
+    calculate_static_hot_raw,
+    calculate_unlock_signal_raw,
+)
 from app.algorithms.search.candidate_merge import (
     hydrate_recall_candidates,
     merge_recall_candidates,
@@ -87,52 +92,6 @@ def _validate_semantic_ranking_parameters(
             "semantic_zero_text_min_score "
             "must be between 0 and 1"
         )
-    
-
-
-def _static_hot_raw(row: PostRow) -> float:
-    """Calculate a long-tail-safe static popularity value."""
-    views = max(0, int(row.get("views") or 0))
-    likes = max(0, int(row.get("likes") or 0))
-    marks = max(0, int(row.get("marks") or 0))
-    dislikes = max(0, int(row.get("dislikes") or 0))
-
-    return max(
-        0.0,
-        0.20 * math.log1p(views)
-        + 0.40 * math.log1p(likes)
-        + 0.30 * math.log1p(marks)
-        - 0.10 * math.log1p(dislikes),
-    )
-
-
-def _realtime_hot_raw(
-    features: RealtimeFeatures,
-) -> float:
-    """Calculate Redis-backed realtime popularity."""
-    views_1h = max(0, int(features.get("views_1h", 0)))
-    views_24h = max(0, int(features.get("views_24h", 0)))
-    likes_24h = max(0, int(features.get("likes_24h", 0)))
-    marks_24h = max(0, int(features.get("marks_24h", 0)))
-
-    return (
-        0.20 * math.log1p(views_1h)
-        + 0.25 * math.log1p(views_24h)
-        + 0.35 * math.log1p(likes_24h)
-        + 0.20 * math.log1p(marks_24h)
-    )
-
-
-def _unlock_raw(
-    features: RealtimeFeatures,
-) -> float:
-    """Calculate the Redis unlock signal."""
-    unlocks_24h = max(
-        0,
-        int(features.get("unlocks_24h", 0)),
-    )
-    return math.log1p(unlocks_24h)
-
 
 def _min_max_normalize(values: list[float]) -> list[float]:
     """Normalize values to the inclusive [0, 1] interval."""
@@ -210,8 +169,8 @@ def _attach_realtime_signals(
         source_id = str(candidate["row"]["source_id"])
         features = realtime_features.get(source_id, {})
 
-        candidate["realtime_hot_raw"] = _realtime_hot_raw(features)
-        candidate["unlock_raw"] = _unlock_raw(features)
+        candidate["realtime_hot_raw"] = calculate_realtime_hot_raw(features)
+        candidate["unlock_raw"] = calculate_unlock_signal_raw(features)
 
         if candidate["realtime_hot_raw"] > 0:
             candidate["recall_sources"].append("redis_realtime")
@@ -658,7 +617,7 @@ class PostSearchService:
                     ),
                     "geo_score": min(1.0, geo_score),
                     "distance_km": distance_km,
-                    "hot_raw": _static_hot_raw(row),
+                    "hot_raw": calculate_static_hot_raw(row),
                     "recall_sources": list(
                         dict.fromkeys(recall_sources)
                     ),
