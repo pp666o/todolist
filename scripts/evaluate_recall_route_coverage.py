@@ -18,14 +18,14 @@ from app.repositories.post_repository import (
     PostRepository,
     post_repository,
 )
-from app.search.candidate_merge import candidate_key
+from todolist.app.algorithms.search.candidate_merge import candidate_key
 from app.search.embedding import (
     DEFAULT_MODEL_PATH,
     encode_query,
     load_model,
     resolve_device,
 )
-from app.search.geo import (
+from todolist.app.algorithms.search.geo import (
     calculate_bounding_box,
     haversine_km,
 )

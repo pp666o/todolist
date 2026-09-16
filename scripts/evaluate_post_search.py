@@ -21,12 +21,12 @@ from pydantic import (
 )
 
 from app.domain.post import PostCategory
-from app.schemas.post_search import (
+from todolist.app.features.post_search.post_search import (
     PostSearchRequest,
     PostSearchResponse,
 )
-from app.services import post_search_service as service_module
-from app.services.post_search_service import post_search_service
+from todolist.app.features.post_search import post_search_service as service_module
+from todolist.app.features.post_search.post_search_service import post_search_service
 
 
 DEFAULT_CASES_PATH = Path(

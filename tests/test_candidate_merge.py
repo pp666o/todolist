@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.search.candidate_merge import (
+from todolist.app.algorithms.search.candidate_merge import (
     hydrate_recall_candidates,
     merge_recall_candidates,
 )

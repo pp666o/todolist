@@ -2,11 +2,11 @@
 
 from fastapi import APIRouter
 
-from app.schemas.post_search import (
+from todolist.app.features.post_search.post_search import (
     PostSearchRequest,
     PostSearchResponse,
 )
-from app.services.post_search_service import post_search_service
+from todolist.app.features.post_search.post_search_service import post_search_service
 
 
 router = APIRouter(

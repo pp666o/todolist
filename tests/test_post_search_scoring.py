@@ -2,7 +2,7 @@
 
 import math
 
-from app.services.post_search_service import (
+from todolist.app.features.post_search.post_search_service import (
     _calculate_bounding_box,
     _character_bigrams,
     _field_match_score,

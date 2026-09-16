@@ -13,16 +13,16 @@ from app.repositories.post_repository import (
     PostRepository,
     post_repository,
 )
-from app.schemas.post_search import (
+from todolist.app.features.post_search.post_search import (
     PostSearchHit,
     PostSearchRequest,
     PostSearchResponse,
 )
-from app.search.candidate_merge import (
+from todolist.app.algorithms.search.candidate_merge import (
     hydrate_recall_candidates,
     merge_recall_candidates,
 )
-from app.search.geo import (
+from todolist.app.algorithms.search.geo import (
     calculate_bounding_box as _calculate_bounding_box,
     haversine_km as _haversine_km,
 )
@@ -835,7 +835,6 @@ class PostSearchService:
                 }
             )
 
-        selected = scored_candidates[: request.top_k]
         realtime_features = await _load_realtime_features(
             scored_candidates,
             degradation_reasons,

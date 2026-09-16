@@ -7,9 +7,9 @@ import asyncio
 import numpy as np
 import pytest
 
-from app.schemas.post_search import PostSearchRequest
-from app.search import semantic_runtime
-from app.search.geo import calculate_bounding_box
+from todolist.app.features.post_search.post_search import PostSearchRequest
+from todolist.app.infrastructure import semantic_runtime
+from todolist.app.algorithms.search.geo import calculate_bounding_box
 
 
 class FakeConnection:

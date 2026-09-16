@@ -5,8 +5,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse
 import os
-from app.api import matching_api, post_search
-import uvicorn # 添加 uvicorn 导入以便直接运行
+from app.api import matching_api
+import uvicorn
+
+from todolist.app.serving.routers import post_search # 添加 uvicorn 导入以便直接运行
 
 # --- 配置前端文件路径 ---
 # 假设前端构建后的文件在 frontend/dist 目录下

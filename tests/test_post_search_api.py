@@ -5,8 +5,8 @@ import asyncio
 import httpx
 from fastapi import FastAPI
 
-from app.api import post_search
-from app.schemas.post_search import PostSearchResponse
+from todolist.app.serving.routers import post_search
+from todolist.app.features.post_search.post_search import PostSearchResponse
 
 
 def create_test_app(monkeypatch) -> FastAPI:

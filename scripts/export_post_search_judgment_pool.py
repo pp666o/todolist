@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Any
 
 from app.infrastructure.postgres import connect_postgres
-from app.schemas.post_search import PostSearchRequest
-from app.services.post_search_service import post_search_service
+from todolist.app.features.post_search.post_search import PostSearchRequest
+from todolist.app.features.post_search.post_search_service import post_search_service
 
 
 DEFAULT_INPUT = Path(

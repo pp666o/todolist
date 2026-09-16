@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from app.schemas.post_search import (
+from todolist.app.features.post_search.post_search import (
     PostSearchHit,
     PostSearchResponse,
 )

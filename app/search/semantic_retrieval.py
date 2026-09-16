@@ -10,7 +10,7 @@ import numpy as np
 from psycopg import AsyncConnection
 
 from app.search.embedding import embedding_to_pgvector
-from app.search.geo import haversine_km
+from todolist.app.algorithms.search.geo import haversine_km
 
 
 MAX_RECALL_LIMIT = 2000

@@ -2,7 +2,8 @@
 
 from fastapi import FastAPI
 
-from app.api import matching_api, post_search
+from app.api import matching_api
+from todolist.app.serving.routers import post_search
 
 
 def test_search_and_matching_routes_are_registered() -> None:
