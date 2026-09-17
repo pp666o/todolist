@@ -2,12 +2,14 @@
 
 import math
 
+from app.algorithms.search.ranking import (
+    min_max_normalize,
+)
 from app.features.post_search.post_search_service import (
     _calculate_bounding_box,
     _character_bigrams,
     _field_match_score,
     _haversine_km,
-    _min_max_normalize,
     _normalize_text,
     _realtime_hot_raw,
     _static_hot_raw,
@@ -73,15 +75,15 @@ def test_bounding_box_contains_center() -> None:
 
 
 def test_min_max_normalization() -> None:
-    assert _min_max_normalize([10.0, 20.0, 30.0]) == [
+    assert min_max_normalize([10.0, 20.0, 30.0]) == [
         0.0,
         0.5,
         1.0,
     ]
 
-    assert _min_max_normalize([5.0]) == [0.0]
-    assert _min_max_normalize([5.0, 5.0]) == [0.0, 0.0]
-    assert _min_max_normalize([]) == []
+    assert min_max_normalize([5.0]) == [0.0]
+    assert min_max_normalize([5.0, 5.0]) == [0.0, 0.0]
+    assert min_max_normalize([]) == []
 
 
 def test_hot_and_unlock_scores_are_nonnegative() -> None:

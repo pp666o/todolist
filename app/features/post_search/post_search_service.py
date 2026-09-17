@@ -12,6 +12,11 @@ from app.algorithms.search.text_relevance import calculate_text_score
 from app.algorithms.search.semantic_scoring import (
     calibrate_semantic_score,
 )
+from app.algorithms.search.ranking import (
+    ScoredSearchCandidate,
+    compute_final_scores,
+    sort_and_select_candidates,
+)
 from app.repositories.post_repository import (
     PostRepository,
     post_repository,
@@ -54,23 +59,6 @@ class BoundingBox(TypedDict):
     max_longitude: float | None
 
 
-class ScoredSearchCandidate(TypedDict, total=False):
-    row: PostRow
-    text_score: float
-    semantic_score: float | None
-    semantic_ranking_score: float
-    geo_score: float
-    distance_km: float | None
-    hot_raw: float
-    realtime_hot_raw: float
-    unlock_raw: float
-    hot_score: float
-    unlock_score: float
-    final_score: float
-    recall_sources: list[str]
-    reasons: list[str]
-
-
 def _validate_semantic_ranking_parameters(
     *,
     semantic_weight: float,
@@ -92,25 +80,6 @@ def _validate_semantic_ranking_parameters(
             "semantic_zero_text_min_score "
             "must be between 0 and 1"
         )
-
-def _min_max_normalize(values: list[float]) -> list[float]:
-    """Normalize values to the inclusive [0, 1] interval."""
-    if not values:
-        return []
-
-    minimum = min(values)
-    maximum = max(values)
-
-    if math.isclose(minimum, maximum):
-        return [0.0 for _ in values]
-
-    scale = maximum - minimum
-
-    return [
-        (value - minimum) / scale
-        for value in values
-    ]
-
 
 def _build_bounding_box(request: PostSearchRequest,
 ) -> BoundingBox:
@@ -182,119 +151,6 @@ def _attach_realtime_signals(
 
         candidate["recall_sources"] = list(dict.fromkeys(candidate["recall_sources"]))
         candidate["reasons"] = list(dict.fromkeys(candidate["reasons"]))
-
-
-def _compute_final_scores(
-    scored_candidates: list[ScoredSearchCandidate],
-    *,
-    request_has_geo: bool,
-    semantic_weight: float,
-) -> None:
-    static_hot_scores = _min_max_normalize(
-        [
-            candidate["hot_raw"]
-            for candidate in scored_candidates
-        ]
-    )
-
-    realtime_hot_scores = _min_max_normalize(
-        [
-            candidate["realtime_hot_raw"]
-            for candidate in scored_candidates
-        ]
-    )
-
-    unlock_scores = _min_max_normalize(
-        [
-            candidate["unlock_raw"]
-            for candidate in scored_candidates
-        ]
-    )
-
-    has_unlock_signal = any(
-        candidate["unlock_raw"] > 0
-        for candidate in scored_candidates
-    )
-
-    for (
-        candidate,
-        static_hot_score,
-        realtime_hot_score,
-        unlock_score,
-    ) in zip(
-        scored_candidates,
-        static_hot_scores,
-        realtime_hot_scores,
-        unlock_scores,
-    ):
-        hot_score = (
-            0.65 * static_hot_score
-            + 0.35 * realtime_hot_score
-        )
-
-        weights = {
-            "text": 0.50,
-            "hot": 0.15,
-        }
-
-        if semantic_weight > 0:
-            weights["semantic"] = (
-                semantic_weight
-            )
-
-        if request_has_geo:
-            weights["geo"] = 0.25
-
-        if has_unlock_signal:
-            weights["unlock"] = 0.10
-
-        weighted_sum = (
-            weights["text"] * candidate["text_score"]
-            + weights["hot"] * hot_score
-        )
-
-        if "semantic" in weights:
-            weighted_sum += (
-                weights["semantic"]
-                * candidate[
-                    "semantic_ranking_score"
-                ]
-            )
-
-        if "geo" in weights:
-            weighted_sum += (
-                weights["geo"] * candidate["geo_score"]
-            )
-
-        if "unlock" in weights:
-            weighted_sum += (
-                weights["unlock"] * unlock_score
-            )
-
-        candidate["hot_score"] = hot_score
-        candidate["unlock_score"] = unlock_score
-        candidate["final_score"] = (
-            weighted_sum / sum(weights.values())
-        )
-
-
-def _sort_candidates(
-    scored_candidates: list[ScoredSearchCandidate],
-) -> None:
-    scored_candidates.sort(
-        key=lambda candidate: (
-            -candidate["final_score"],
-            -candidate["text_score"],
-            -candidate["semantic_ranking_score"],
-            (
-                candidate["distance_km"]
-                if candidate["distance_km"] is not None
-                else math.inf
-            ),
-            -int(candidate["row"]["id"]),
-        )
-    )
-
 
 def _build_hits(
     selected: list[ScoredSearchCandidate],
@@ -644,12 +500,12 @@ class PostSearchService:
             )
         )
 
-        _compute_final_scores(
+        compute_final_scores(
             scored_candidates,
             request_has_geo=request_has_geo,
             semantic_weight=self._semantic_weight,
         )
-        _sort_candidates(scored_candidates)
+        sort_and_select_candidates(scored_candidates)
 
         selected = scored_candidates[: request.top_k]
         items = _build_hits(selected)
