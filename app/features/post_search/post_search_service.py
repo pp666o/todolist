@@ -266,55 +266,72 @@ class PostSearchService:
         self._semantic_zero_text_min_score = float(
             semantic_zero_text_min_score
         )
+
     async def _recall_candidates(
         self,
         *,
-        freshness_candidates: list[PostRow],
-        merged_candidates: list[
-            MergedRecallCandidate
-        ],
+        request: PostSearchRequest,
+        bounding_box: BoundingBox,
         degradation_reasons: list[str],
-    ) -> list[HydratedRecallCandidate]:
+    ) -> RecallResult:
+        """Recall freshness and semantic candidates, then merge them."""
 
-        source_keys = [
-            (
-                candidate["source"],
-                candidate["source_id"],
+        freshness_candidates = (
+            await self._repository.search_candidates(
+                category=request.category,
+                visible_statuses=request.visible_statuses,
+                city=request.city,
+                district=request.district,
+                min_latitude=bounding_box[
+                    "min_latitude"
+                ],
+                max_latitude=bounding_box[
+                    "max_latitude"
+                ],
+                min_longitude=bounding_box[
+                    "min_longitude"
+                ],
+                max_longitude=bounding_box[
+                    "max_longitude"
+                ],
+                limit=request.recall_k,
             )
-            for candidate in merged_candidates
-        ]
+        )
 
-        try:
-            hydrated_rows = (
-                await self._repository.fetch_by_source_keys(
-                    source_keys
+        semantic_candidates: list[
+            SemanticCandidate
+        ] = []
+
+        if self._semantic_recaller is not None:
+            try:
+                semantic_candidates = list(
+                    await self._semantic_recaller(
+                        request
+                    )
                 )
-            )
-
-            return hydrate_recall_candidates(
-                merged_candidates,
-                hydrated_rows,
-            )
-
-        except Exception as exc:
-            degradation_reasons.append(
-                "Candidate hydration unavailable: "
-                f"{type(exc).__name__}"
-            )
-
-            freshness_only = (
-                merge_recall_candidates(
-                    freshness_candidates=(
-                        freshness_candidates
-                    ),
-                    semantic_candidates=[],
+            except Exception as exc:
+                degradation_reasons.append(
+                    "Semantic recall unavailable: "
+                    f"{type(exc).__name__}"
                 )
-            )
 
-            return hydrate_recall_candidates(
-                freshness_only,
+        merged_candidates = (
+            merge_recall_candidates(
+                freshness_candidates=(
+                    freshness_candidates
+                ),
+                semantic_candidates=(
+                    semantic_candidates
+                ),
+            )
+        )
+
+        return {
+            "freshness_candidates":
                 freshness_candidates,
-            )
+            "merged_candidates":
+                merged_candidates,
+        }
         
     async def _hydrate_candidates(
         self,
@@ -376,9 +393,9 @@ class PostSearchService:
             request
         )
         recall_result = await self._recall_candidates(
-            request,
-            bounding_box,
-            degradation_reasons,
+            request=request,
+            bounding_box=bounding_box,
+            degradation_reasons=degradation_reasons,
         )
         hydrated_candidates = (
             await self._hydrate_candidates(
