@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from app.infrastructure.postgres import connect_postgres
-from app.search.embedding import (
+from app.infrastructure.search.embedding_runtime import (
     DEFAULT_MODEL_PATH,
     encode_query,
     load_model,

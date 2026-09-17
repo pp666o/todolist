@@ -9,7 +9,9 @@ from typing import Any, Literal, TypedDict
 import numpy as np
 from psycopg import AsyncConnection
 
-from app.search.embedding import embedding_to_pgvector
+from app.infrastructure.search.pgvector import (
+    embedding_to_pgvector,
+)
 from app.algorithms.search.geo import haversine_km
 
 

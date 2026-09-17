@@ -4,16 +4,17 @@ from typing import Any
 
 import numpy as np
 import pytest
-
-from app.search.embedding import (
+from app.algorithms.search.embedding import (
     MODEL_DIMENSION,
     QUERY_INSTRUCTION,
     build_query_text,
+)
+
+from app.infrastructure.search.embedding_runtime import (
     encode_documents,
     encode_queries,
     encode_query,
 )
-
 
 class FakeModel:
     def __init__(

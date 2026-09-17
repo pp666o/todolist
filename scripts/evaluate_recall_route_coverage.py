@@ -19,7 +19,7 @@ from app.repositories.post_repository import (
     post_repository,
 )
 from app.algorithms.search.candidate_merge import candidate_key
-from app.search.embedding import (
+from app.infrastructure.search.embedding_runtime import (
     DEFAULT_MODEL_PATH,
     encode_query,
     load_model,

@@ -13,18 +13,24 @@ import numpy as np
 from psycopg import AsyncConnection
 
 from app.infrastructure.postgres import connect_postgres
-from app.search.embedding import (
-    DEFAULT_BATCH_SIZE,
-    DEFAULT_MODEL_PATH,
+
+from app.algorithms.search.embedding import (
     MODEL_DIMENSION,
     build_post_text,
-    embedding_to_pgvector,
-    encode_documents,
-    load_model,
-    resolve_device,
     validate_embedding_batch,
 )
 
+from app.infrastructure.search.embedding_runtime import (
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_MODEL_PATH,
+    encode_documents,
+    load_model,
+    resolve_device,
+)
+
+from app.infrastructure.search.pgvector import (
+    embedding_to_pgvector,
+)
 
 async def count_missing_embeddings(
     connection: AsyncConnection[dict[str, Any]],

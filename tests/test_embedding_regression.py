@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import numpy as np
 
-from app.search.embedding import (
+from app.algorithms.search.embedding import (
     MODEL_DIMENSION,
     build_post_text,
     build_query_text,
-    embedding_to_pgvector,
     validate_embedding_batch,
 )
 
+from app.infrastructure.search.pgvector import (
+    embedding_to_pgvector,
+)
 
 def test_document_embedding_text_contract() -> None:
     text = build_post_text(

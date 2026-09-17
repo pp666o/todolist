@@ -8,7 +8,7 @@ from typing import Any
 
 from app.infrastructure.postgres import connect_postgres
 from app.features.post_search.post_search import PostSearchRequest
-from app.search.embedding import (
+from app.infrastructure.search.embedding_runtime import (
     DEFAULT_MODEL_PATH,
     encode_query,
     load_model,
