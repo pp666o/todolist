@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Awaitable, Callable
 from typing import Any, TypedDict
 from uuid import uuid4
@@ -26,6 +25,7 @@ from app.features.post_search.post_search import (
     PostSearchRequest,
     PostSearchResponse,
 )
+
 from app.algorithms.search.popularity import (
     calculate_realtime_hot_raw,
     calculate_static_hot_raw,
@@ -35,6 +35,7 @@ from app.algorithms.search.candidate_merge import (
     hydrate_recall_candidates,
     merge_recall_candidates,
 )
+
 from app.algorithms.search.geo import (
     calculate_bounding_box as _calculate_bounding_box,
     haversine_km as _haversine_km,
@@ -81,7 +82,7 @@ def _validate_semantic_ranking_parameters(
             "must be between 0 and 1"
         )
 
-def _build_bounding_box(request: PostSearchRequest,
+def _resolve_bounding_box(request: PostSearchRequest,
 ) -> BoundingBox:
     bounding_box: BoundingBox = {
         "min_latitude": None,
@@ -260,7 +261,7 @@ class PostSearchService:
         self._semantic_zero_text_min_score = float(
             semantic_zero_text_min_score
         )
-
+    
     async def search(
         self,
         request: PostSearchRequest,
@@ -268,7 +269,7 @@ class PostSearchService:
         """Search posts with lexical, geographic and static signals."""
 
         degradation_reasons: list[str] = []
-        bounding_box = _build_bounding_box(request)
+        bounding_box = _resolve_bounding_box(request)
         freshness_candidates = (
             await self._repository.search_candidates(
                 category=request.category,
