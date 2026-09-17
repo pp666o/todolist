@@ -7,11 +7,13 @@ from typing import Any
 
 import pytest
 
-from app.search.lexical_retrieval import (
+from app.algorithms.search.lexical import (
     extract_lexical_query_terms,
-    lexical_search_filtered,
 )
 
+from app.infrastructure.search.lexical_retrieval import (
+    lexical_search_filtered,
+)
 
 class FakeCursor:
     def __init__(

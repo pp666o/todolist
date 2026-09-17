@@ -29,7 +29,7 @@ from app.algorithms.search.geo import (
     calculate_bounding_box,
     haversine_km,
 )
-from app.search.lexical_retrieval import (
+from app.infrastructure.search.lexical_retrieval import (
     lexical_search_filtered,
 )
 from app.search.semantic_retrieval import (
