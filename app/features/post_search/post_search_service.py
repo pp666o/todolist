@@ -32,6 +32,8 @@ from app.algorithms.search.popularity import (
     calculate_unlock_signal_raw,
 )
 from app.algorithms.search.candidate_merge import (
+    HydratedRecallCandidate,
+    MergedRecallCandidate,
     hydrate_recall_candidates,
     merge_recall_candidates,
 )
@@ -41,6 +43,9 @@ from app.algorithms.search.geo import (
     haversine_km as _haversine_km,
 )
 
+class RecallResult(TypedDict):
+    freshness_candidates: list[PostRow]
+    merged_candidates: list[MergedRecallCandidate]
 
 SemanticRecaller = Callable[
     [PostSearchRequest],
@@ -261,60 +266,15 @@ class PostSearchService:
         self._semantic_zero_text_min_score = float(
             semantic_zero_text_min_score
         )
-    
-    async def search(
+    async def _recall_candidates(
         self,
-        request: PostSearchRequest,
-    ) -> PostSearchResponse:
-        """Search posts with lexical, geographic and static signals."""
-
-        degradation_reasons: list[str] = []
-        bounding_box = _resolve_bounding_box(request)
-        freshness_candidates = (
-            await self._repository.search_candidates(
-                category=request.category,
-                visible_statuses=request.visible_statuses,
-                city=request.city,
-                district=request.district,
-                min_latitude=bounding_box[
-                    "min_latitude"
-                ],
-                max_latitude=bounding_box[
-                    "max_latitude"
-                ],
-                min_longitude=bounding_box[
-                    "min_longitude"
-                ],
-                max_longitude=bounding_box[
-                    "max_longitude"
-                ],
-                limit=request.recall_k,
-            )
-        )
-
-        semantic_candidates: list[
-            dict[str, Any]
-        ] = []
-
-        if self._semantic_recaller is not None:
-            try:
-                semantic_candidates = list(
-                    await self._semantic_recaller(
-                        request
-                    )
-                )
-            except Exception as exc:
-                degradation_reasons.append(
-                    "Semantic recall unavailable: "
-                    f"{type(exc).__name__}"
-                )
-
-        merged_candidates = merge_recall_candidates(
-            freshness_candidates=(
-                freshness_candidates
-            ),
-            semantic_candidates=semantic_candidates,
-        )
+        *,
+        freshness_candidates: list[PostRow],
+        merged_candidates: list[
+            MergedRecallCandidate
+        ],
+        degradation_reasons: list[str],
+    ) -> list[HydratedRecallCandidate]:
 
         source_keys = [
             (
@@ -330,31 +290,113 @@ class PostSearchService:
                     source_keys
                 )
             )
-            hydrated_candidates = (
-                hydrate_recall_candidates(
-                    merged_candidates,
-                    hydrated_rows,
-                )
+
+            return hydrate_recall_candidates(
+                merged_candidates,
+                hydrated_rows,
             )
+
         except Exception as exc:
             degradation_reasons.append(
                 "Candidate hydration unavailable: "
                 f"{type(exc).__name__}"
             )
 
-            freshness_only = merge_recall_candidates(
-                freshness_candidates=(
-                    freshness_candidates
-                ),
-                semantic_candidates=[],
-            )
-            hydrated_candidates = (
-                hydrate_recall_candidates(
-                    freshness_only,
-                    freshness_candidates,
+            freshness_only = (
+                merge_recall_candidates(
+                    freshness_candidates=(
+                        freshness_candidates
+                    ),
+                    semantic_candidates=[],
                 )
             )
 
+            return hydrate_recall_candidates(
+                freshness_only,
+                freshness_candidates,
+            )
+        
+    async def _hydrate_candidates(
+        self,
+        *,
+        freshness_candidates: list[PostRow],
+        merged_candidates: list[
+            MergedRecallCandidate
+        ],
+        degradation_reasons: list[str],
+    ) -> list[HydratedRecallCandidate]:
+
+        source_keys = [
+            (
+                candidate["source"],
+                candidate["source_id"],
+            )
+            for candidate in merged_candidates
+        ]
+
+        try:
+            hydrated_rows = (
+                await self._repository.fetch_by_source_keys(
+                    source_keys
+                )
+            )
+
+            return hydrate_recall_candidates(
+                merged_candidates,
+                hydrated_rows,
+            )
+
+        except Exception as exc:
+            degradation_reasons.append(
+                "Candidate hydration unavailable: "
+                f"{type(exc).__name__}"
+            )
+
+            freshness_only = (
+                merge_recall_candidates(
+                    freshness_candidates=(
+                        freshness_candidates
+                    ),
+                    semantic_candidates=[],
+                )
+            )
+
+            return hydrate_recall_candidates(
+                freshness_only,
+                freshness_candidates,
+            )  
+         
+    async def search(
+        self,
+        request: PostSearchRequest,
+    ) -> PostSearchResponse:
+        """Search posts with lexical, geographic and static signals."""
+        degradation_reasons: list[str] = []
+        bounding_box = _resolve_bounding_box(
+            request
+        )
+        recall_result = await self._recall_candidates(
+            request,
+            bounding_box,
+            degradation_reasons,
+        )
+        hydrated_candidates = (
+            await self._hydrate_candidates(
+                freshness_candidates=(
+                    recall_result[
+                        "freshness_candidates"
+                    ]
+                ),
+                merged_candidates=(
+                    recall_result[
+                        "merged_candidates"
+                    ]
+                ),
+                degradation_reasons=(
+                    degradation_reasons
+                ),
+            )
+        )
         scored_candidates: list[ScoredSearchCandidate] = []
 
         for recalled_candidate in hydrated_candidates:
