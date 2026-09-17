@@ -15,7 +15,7 @@ from app.infrastructure.search.embedding_runtime import (
     resolve_device,
 )
 from app.algorithms.search.geo import calculate_bounding_box
-from app.search.semantic_retrieval import (
+from app.infrastructure.search.semantic_retrieval import (
     FilteredSemanticCandidate,
     semantic_search_filtered,
 )

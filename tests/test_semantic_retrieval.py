@@ -6,8 +6,10 @@ from typing import Any
 import numpy as np
 import pytest
 
-from app.search.embedding import MODEL_DIMENSION
-from app.search.semantic_retrieval import (
+from app.algorithms.search.embedding import (
+    MODEL_DIMENSION,
+)
+from app.infrastructure.search.semantic_retrieval import (
     semantic_search_filtered,
     semantic_search_global,
     validate_filtered_semantic_search_parameters,

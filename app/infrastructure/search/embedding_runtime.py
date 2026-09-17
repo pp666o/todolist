@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
-import torch
 import numpy as np
 
 from app.algorithms.search.embedding import (

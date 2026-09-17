@@ -8,7 +8,9 @@ import numpy as np
 import pytest
 
 from app.features.post_search.post_search import PostSearchRequest
-from app.infrastructure import semantic_runtime
+from app.infrastructure.search import (
+    semantic_runtime,
+)
 from app.algorithms.search.geo import calculate_bounding_box
 
 

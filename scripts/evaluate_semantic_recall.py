@@ -20,7 +20,7 @@ from app.infrastructure.search.embedding_runtime import (
     load_model,
     resolve_device,
 )
-from app.search.semantic_retrieval import (
+from app.infrastructure.search.semantic_retrieval import (
     MAX_EF_SEARCH,
     MAX_RECALL_LIMIT,
     semantic_search_filtered,
