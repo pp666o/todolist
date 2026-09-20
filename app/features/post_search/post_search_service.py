@@ -565,9 +565,8 @@ class PostSearchService:
             request_has_geo=request_has_geo,
             semantic_weight=self._semantic_weight,
         )
-        sort_and_select_candidates(scored_candidates)
+        sort_and_select_candidates(scored_candidates,top_k=request.top_k,)
 
-        selected = scored_candidates[: request.top_k]
         items = _build_hits(selected)
 
         return _build_response(

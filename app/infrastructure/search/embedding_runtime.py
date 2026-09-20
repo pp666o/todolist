@@ -25,7 +25,7 @@ def resolve_device(
     requested_device: str,
 ) -> str:
     """Resolve auto/cpu/cuda into an available Torch device."""
-
+    import torch
     if requested_device not in {
         "auto",
         "cpu",
