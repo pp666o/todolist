@@ -5,21 +5,19 @@ import math
 from app.algorithms.search.ranking import (
     min_max_normalize,
 )
-from app.features.post_search.post_search_service import (   
-    _realtime_hot_raw,
-)
 from app.algorithms.search.geo import (
     calculate_bounding_box as _calculate_bounding_box,
     haversine_km as _haversine_km,
 )
 from app.algorithms.search.text_relevance import (
-    _character_bigram,
+    _character_bigrams,
     _field_match_score,
     _normalize_text,
 )
 from app.algorithms.search.popularity import (
-    _static_hot_raw,
-    _unlock_raw,
+    calculate_static_hot_raw,
+    calculate_realtime_hot_raw,
+    calculate_unlock_signal_raw,
 )
 
 
@@ -57,7 +55,7 @@ def test_field_match_score_prioritizes_exact_match() -> None:
 
 
 def test_haversine_same_location_is_zero() -> None:
-    distance = _haversine_km(
+    distance = haversine_km(
         37.689434,
         112.761673,
         37.689434,
@@ -68,7 +66,7 @@ def test_haversine_same_location_is_zero() -> None:
 
 
 def test_bounding_box_contains_center() -> None:
-    box = _calculate_bounding_box(
+    box = calculate_bounding_box(
         latitude=37.689434,
         longitude=112.761673,
         radius_km=10.0,
@@ -108,6 +106,6 @@ def test_hot_and_unlock_scores_are_nonnegative() -> None:
         "unlocks_24h": 3,
     }
 
-    assert _static_hot_raw(row) > 0
-    assert _realtime_hot_raw(realtime) > 0
-    assert _unlock_raw(realtime) > 0
+    assert calculate_static_hot_raw(row) > 0
+    assert calculate_realtime_hot_raw(realtime) > 0
+    assert calculate_unlock_signal_raw(realtime) > 0
