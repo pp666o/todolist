@@ -5,13 +5,19 @@ import math
 from app.algorithms.search.ranking import (
     min_max_normalize,
 )
-from app.features.post_search.post_search_service import (
-    _calculate_bounding_box,
-    _character_bigrams,
-    _field_match_score,
-    _haversine_km,
-    _normalize_text,
+from app.features.post_search.post_search_service import (   
     _realtime_hot_raw,
+)
+from app.algorithms.search.geo import (
+    calculate_bounding_box as _calculate_bounding_box,
+    haversine_km as _haversine_km,
+)
+from app.algorithms.search.text_relevance import (
+    _character_bigram,
+    _field_match_score,
+    _normalize_text,
+)
+from app.algorithms.search.popularity import (
     _static_hot_raw,
     _unlock_raw,
 )
