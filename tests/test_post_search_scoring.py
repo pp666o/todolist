@@ -6,8 +6,8 @@ from app.algorithms.search.ranking import (
     min_max_normalize,
 )
 from app.algorithms.search.geo import (
-    calculate_bounding_box as _calculate_bounding_box,
-    haversine_km as _haversine_km,
+    calculate_bounding_box as calculate_bounding_box,
+    haversine_km as haversine_km,
 )
 from app.algorithms.search.text_relevance import (
     _character_bigrams,
