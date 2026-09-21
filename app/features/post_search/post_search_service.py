@@ -6,20 +6,23 @@ from collections.abc import Awaitable, Callable
 from typing import Any, TypedDict
 from uuid import uuid4
 
-from app.infrastructure.redis import get_post_realtime_features
+
 from app.algorithms.search.text_relevance import calculate_text_score
 from app.algorithms.search.semantic_scoring import (
     calibrate_semantic_score,
+)
+from app.features.post_search.ports import (
+    PostRow,
+    PostSearchRepository,
+    RealtimeFeatureLoader,
+    RealtimeFeatureMap,
 )
 from app.algorithms.search.ranking import (
     ScoredSearchCandidate,
     compute_final_scores,
     sort_and_select_candidates,
 )
-from app.repositories.post_repository import (
-    PostRepository,
-    post_repository,
-)
+
 from app.features.post_search.post_search import (
     PostSearchHit,
     PostSearchRequest,
@@ -51,11 +54,9 @@ SemanticRecaller = Callable[
     [PostSearchRequest],
     Awaitable[list[dict[str, Any]]],
 ]
-
-PostRow = dict[str, Any]
 SemanticCandidate = dict[str, Any]
-RealtimeFeatures = dict[str, int]
-RealtimeFeatureMap = dict[str, RealtimeFeatures]
+
+
 
 
 class BoundingBox(TypedDict):
@@ -111,6 +112,7 @@ def _resolve_bounding_box(request: PostSearchRequest,
 
 
 async def _load_realtime_features(
+    self,
     scored_candidates: list[ScoredSearchCandidate],
     degradation_reasons: list[str],
 ) -> RealtimeFeatureMap:
@@ -125,7 +127,11 @@ async def _load_realtime_features(
     ]
 
     try:
-        realtime_features = await get_post_realtime_features(source_ids)
+        realtime_features = (
+            await self._realtime_feature_loader(
+                source_ids
+            )
+        )
     except Exception as exc:
         degradation_reasons.append(
             "Redis realtime features unavailable: "
@@ -245,9 +251,10 @@ class PostSearchService:
 
     def __init__(
         self,
-        repository: PostRepository = post_repository,
-        semantic_recaller: SemanticRecaller | None = None,
         *,
+        repository: PostSearchRepository,
+        realtime_feature_loader: RealtimeFeatureLoader,
+        semantic_recaller: SemanticRecaller | None = None,
         semantic_weight: float = 0.0,
         semantic_zero_text_min_score: float = 0.0,
     ) -> None:
@@ -266,6 +273,9 @@ class PostSearchService:
         self._semantic_zero_text_min_score = float(
             semantic_zero_text_min_score
         )
+        self._repository = repository
+        self._realtime_feature_loader = realtime_feature_loader
+        self._semantic_recaller = semantic_recaller
 
     async def _recall_candidates(
         self,
@@ -541,7 +551,7 @@ class PostSearchService:
                 }
             )
 
-        realtime_features = await _load_realtime_features(
+        realtime_features = await self._load_realtime_features(
             scored_candidates,
             degradation_reasons,
         )
