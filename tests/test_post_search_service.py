@@ -6,8 +6,8 @@ from typing import Any
 import pytest
 
 from app.features.post_search.post_search import PostSearchRequest
-from app.features.post_search import post_search_service as service_module
 from app.features.post_search.post_search_service import PostSearchService
+from app.serving.dependencies import get_post_search_service
 
 
 class FakePostRepository:
@@ -22,14 +22,17 @@ class FakePostRepository:
         ] | None = None,
     ) -> None:
         self.rows = list(rows)
+
         self.freshness_rows = (
             list(freshness_rows)
             if freshness_rows is not None
             else list(rows)
         )
+
         self.last_parameters: (
             dict[str, Any] | None
         ) = None
+
         self.last_source_keys: list[
             tuple[str, str]
         ] | None = None
@@ -39,7 +42,10 @@ class FakePostRepository:
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         self.last_parameters = kwargs
-        return list(self.freshness_rows)
+
+        return list(
+            self.freshness_rows
+        )
 
     async def fetch_by_source_keys(
         self,
@@ -79,9 +85,15 @@ def make_post(
         "source": "mysql_tiezi_geo_new",
         "source_id": source_id,
         "title": title,
-        "content": "软件欢迎发展，提供电脑维修帮助。",
+        "content": (
+            "软件欢迎发展，"
+            "提供电脑维修帮助。"
+        ),
         "category": "求助",
-        "tags": ["软件", "电脑"],
+        "tags": [
+            "软件",
+            "电脑",
+        ],
         "latitude": latitude,
         "longitude": longitude,
         "country": "中国",
@@ -107,9 +119,24 @@ def run(coroutine):
     return asyncio.run(coroutine)
 
 
-def test_search_uses_business_source_id_for_redis(
-    monkeypatch,
-) -> None:
+async def zero_realtime_features(
+    post_ids,
+):
+    """Return neutral realtime signals."""
+
+    return {
+        str(post_id): {
+            "views_1h": 0,
+            "views_24h": 0,
+            "likes_24h": 0,
+            "marks_24h": 0,
+            "unlocks_24h": 0,
+        }
+        for post_id in post_ids
+    }
+
+
+def test_search_uses_business_source_id_for_redis() -> None:
     rows = [
         make_post(
             post_id=1,
@@ -120,11 +147,18 @@ def test_search_uses_business_source_id_for_redis(
         )
     ]
 
-    repository = FakePostRepository(rows)
+    repository = FakePostRepository(
+        rows
+    )
+
     captured_ids: list[str] = []
 
-    async def fake_realtime_features(post_ids):
-        captured_ids.extend(post_ids)
+    async def fake_realtime_features(
+        post_ids,
+    ):
+        captured_ids.extend(
+            post_ids
+        )
 
         return {
             "5891": {
@@ -136,13 +170,12 @@ def test_search_uses_business_source_id_for_redis(
             }
         }
 
-    monkeypatch.setattr(
-        service_module,
-        "get_post_realtime_features",
-        fake_realtime_features,
+    service = PostSearchService(
+        repository=repository,
+        realtime_feature_loader=(
+            fake_realtime_features
+        ),
     )
-
-    service = PostSearchService(repository=repository)
 
     response = run(
         service.search(
@@ -159,17 +192,31 @@ def test_search_uses_business_source_id_for_redis(
         )
     )
 
-    assert captured_ids == ["5891"]
+    assert captured_ids == [
+        "5891"
+    ]
+
     assert response.result_count == 1
-    assert response.items[0].source_id == "5891"
-    assert response.items[0].distance_km == 0.0
-    assert response.items[0].unlock_score == 0.0
+
+    assert (
+        response.items[0].source_id
+        == "5891"
+    )
+
+    assert (
+        response.items[0].distance_km
+        == 0.0
+    )
+
+    assert (
+        response.items[0].unlock_score
+        == 0.0
+    )
+
     assert response.degraded is False
 
 
-def test_exact_radius_filter_removes_outside_post(
-    monkeypatch,
-) -> None:
+def test_exact_radius_filter_removes_outside_post() -> None:
     rows = [
         make_post(
             post_id=1,
@@ -187,26 +234,13 @@ def test_exact_radius_filter_removes_outside_post(
         ),
     ]
 
-    async def zero_features(post_ids):
-        return {
-            str(post_id): {
-                "views_1h": 0,
-                "views_24h": 0,
-                "likes_24h": 0,
-                "marks_24h": 0,
-                "unlocks_24h": 0,
-            }
-            for post_id in post_ids
-        }
-
-    monkeypatch.setattr(
-        service_module,
-        "get_post_realtime_features",
-        zero_features,
-    )
-
     service = PostSearchService(
-        repository=FakePostRepository(rows)
+        repository=FakePostRepository(
+            rows
+        ),
+        realtime_feature_loader=(
+            zero_realtime_features
+        ),
     )
 
     response = run(
@@ -223,12 +257,14 @@ def test_exact_radius_filter_removes_outside_post(
     )
 
     assert response.result_count == 1
-    assert response.items[0].source_id == "inside"
+
+    assert (
+        response.items[0].source_id
+        == "inside"
+    )
 
 
-def test_redis_failure_degrades_without_losing_results(
-    monkeypatch,
-) -> None:
+def test_redis_failure_degrades_without_losing_results() -> None:
     rows = [
         make_post(
             post_id=1,
@@ -239,17 +275,20 @@ def test_redis_failure_degrades_without_losing_results(
         )
     ]
 
-    async def failed_realtime_features(_):
-        raise ConnectionError("simulated Redis failure")
-
-    monkeypatch.setattr(
-        service_module,
-        "get_post_realtime_features",
-        failed_realtime_features,
-    )
+    async def failed_realtime_features(
+        _,
+    ):
+        raise ConnectionError(
+            "simulated Redis failure"
+        )
 
     service = PostSearchService(
-        repository=FakePostRepository(rows)
+        repository=FakePostRepository(
+            rows
+        ),
+        realtime_feature_loader=(
+            failed_realtime_features
+        ),
     )
 
     response = run(
@@ -264,13 +303,19 @@ def test_redis_failure_degrades_without_losing_results(
 
     assert response.result_count == 1
     assert response.degraded is True
-    assert response.degraded_reason is not None
-    assert "Redis" in response.degraded_reason
+
+    assert (
+        response.degraded_reason
+        is not None
+    )
+
+    assert (
+        "Redis"
+        in response.degraded_reason
+    )
 
 
-def test_search_merges_freshness_and_semantic_candidates(
-    monkeypatch,
-) -> None:
+def test_search_merges_freshness_and_semantic_candidates() -> None:
     fresh = make_post(
         post_id=1,
         source_id="fresh",
@@ -278,6 +323,7 @@ def test_search_merges_freshness_and_semantic_candidates(
         latitude=37.689434,
         longitude=112.761673,
     )
+
     shared = make_post(
         post_id=2,
         source_id="shared",
@@ -285,6 +331,7 @@ def test_search_merges_freshness_and_semantic_candidates(
         latitude=37.689434,
         longitude=112.761673,
     )
+
     semantic_only = make_post(
         post_id=3,
         source_id="semantic-only",
@@ -292,7 +339,11 @@ def test_search_merges_freshness_and_semantic_candidates(
         latitude=37.689434,
         longitude=112.761673,
     )
-    semantic_only["content"] = "另一段不包含查询词的正文"
+
+    semantic_only["content"] = (
+        "另一段不包含查询词的正文"
+    )
+
     semantic_only["tags"] = []
 
     repository = FakePostRepository(
@@ -307,47 +358,48 @@ def test_search_merges_freshness_and_semantic_candidates(
         ],
     )
 
-    async def fake_semantic_recaller(_):
+    async def fake_semantic_recaller(
+        _,
+    ):
         return [
             {
-                "source": shared["source"],
-                "source_id": shared["source_id"],
+                "source": (
+                    shared["source"]
+                ),
+                "source_id": (
+                    shared["source_id"]
+                ),
                 "semantic_score": 0.91,
                 "semantic_distance": 0.09,
             },
             {
-                "source": semantic_only["source"],
-                "source_id": semantic_only["source_id"],
+                "source": (
+                    semantic_only[
+                        "source"
+                    ]
+                ),
+                "source_id": (
+                    semantic_only[
+                        "source_id"
+                    ]
+                ),
                 "semantic_score": 0.83,
                 "semantic_distance": 0.17,
             },
         ]
 
-    async def zero_features(post_ids):
-        return {
-            str(post_id): {
-                "views_1h": 0,
-                "views_24h": 0,
-                "likes_24h": 0,
-                "marks_24h": 0,
-                "unlocks_24h": 0,
-            }
-            for post_id in post_ids
-        }
-
-    monkeypatch.setattr(
-        service_module,
-        "get_post_realtime_features",
-        zero_features,
-    )
-
     service = PostSearchService(
         repository=repository,
+        realtime_feature_loader=(
+            zero_realtime_features
+        ),
         semantic_recaller=(
             fake_semantic_recaller
         ),
         semantic_weight=0.10,
-        semantic_zero_text_min_score=0.50,
+        semantic_zero_text_min_score=(
+            0.50
+        ),
     )
 
     response = run(
@@ -360,51 +412,76 @@ def test_search_merges_freshness_and_semantic_candidates(
         )
     )
 
-    assert response.total_candidates == 3
+    assert (
+        response.total_candidates
+        == 3
+    )
+
     assert response.result_count == 3
-    assert repository.last_source_keys == [
-        (
-            "mysql_tiezi_geo_new",
-            "fresh",
-        ),
-        (
-            "mysql_tiezi_geo_new",
-            "shared",
-        ),
-        (
-            "mysql_tiezi_geo_new",
-            "semantic-only",
-        ),
-    ]
+
+    assert (
+        repository.last_source_keys
+        == [
+            (
+                "mysql_tiezi_geo_new",
+                "fresh",
+            ),
+            (
+                "mysql_tiezi_geo_new",
+                "shared",
+            ),
+            (
+                "mysql_tiezi_geo_new",
+                "semantic-only",
+            ),
+        ]
+    )
 
     items = {
         item.source_id: item
         for item in response.items
     }
 
-    assert items["shared"].semantic_score == 0.91
-    assert items["shared"].recall_sources[:2] == [
-        "freshness",
-        "semantic",
-    ]
+    assert (
+        items["shared"].semantic_score
+        == 0.91
+    )
 
     assert (
-        items["semantic-only"].semantic_score
+        items["shared"].recall_sources[
+            :2
+        ]
+        == [
+            "freshness",
+            "semantic",
+        ]
+    )
+
+    assert (
+        items[
+            "semantic-only"
+        ].semantic_score
         == 0.83
     )
-    assert items[
-        "semantic-only"
-    ].text_score == 0.0
-    assert items[
-        "semantic-only"
-    ].recall_sources == [
-        "semantic"
-    ]
+
+    assert (
+        items[
+            "semantic-only"
+        ].text_score
+        == 0.0
+    )
+
+    assert (
+        items[
+            "semantic-only"
+        ].recall_sources
+        == [
+            "semantic"
+        ]
+    )
 
 
-def test_semantic_failure_falls_back_to_freshness(
-    monkeypatch,
-) -> None:
+def test_semantic_failure_falls_back_to_freshness() -> None:
     row = make_post(
         post_id=1,
         source_id="fresh",
@@ -413,32 +490,23 @@ def test_semantic_failure_falls_back_to_freshness(
         longitude=112.761673,
     )
 
-    async def failed_semantic(_):
+    async def failed_semantic(
+        _,
+    ):
         raise RuntimeError(
             "simulated semantic failure"
         )
 
-    async def zero_features(post_ids):
-        return {
-            str(post_id): {
-                "views_1h": 0,
-                "views_24h": 0,
-                "likes_24h": 0,
-                "marks_24h": 0,
-                "unlocks_24h": 0,
-            }
-            for post_id in post_ids
-        }
-
-    monkeypatch.setattr(
-        service_module,
-        "get_post_realtime_features",
-        zero_features,
-    )
-
     service = PostSearchService(
-        repository=FakePostRepository([row]),
-        semantic_recaller=failed_semantic,
+        repository=FakePostRepository(
+            [row]
+        ),
+        realtime_feature_loader=(
+            zero_realtime_features
+        ),
+        semantic_recaller=(
+            failed_semantic
+        ),
     )
 
     response = run(
@@ -452,21 +520,33 @@ def test_semantic_failure_falls_back_to_freshness(
     )
 
     assert response.result_count == 1
-    assert response.items[0].source_id == "fresh"
-    assert response.items[
-        0
-    ].semantic_score is None
+
+    assert (
+        response.items[0].source_id
+        == "fresh"
+    )
+
+    assert (
+        response.items[
+            0
+        ].semantic_score
+        is None
+    )
+
     assert response.degraded is True
-    assert response.degraded_reason is not None
+
+    assert (
+        response.degraded_reason
+        is not None
+    )
+
     assert (
         "Semantic recall unavailable"
         in response.degraded_reason
     )
 
 
-def test_semantic_and_redis_failures_are_combined(
-    monkeypatch,
-) -> None:
+def test_semantic_and_redis_failures_are_combined() -> None:
     row = make_post(
         post_id=1,
         source_id="fresh",
@@ -475,25 +555,30 @@ def test_semantic_and_redis_failures_are_combined(
         longitude=112.761673,
     )
 
-    async def failed_semantic(_):
+    async def failed_semantic(
+        _,
+    ):
         raise RuntimeError(
             "simulated semantic failure"
         )
 
-    async def failed_redis(_):
+    async def failed_redis(
+        _,
+    ):
         raise ConnectionError(
             "simulated Redis failure"
         )
 
-    monkeypatch.setattr(
-        service_module,
-        "get_post_realtime_features",
-        failed_redis,
-    )
-
     service = PostSearchService(
-        repository=FakePostRepository([row]),
-        semantic_recaller=failed_semantic,
+        repository=FakePostRepository(
+            [row]
+        ),
+        realtime_feature_loader=(
+            failed_redis
+        ),
+        semantic_recaller=(
+            failed_semantic
+        ),
     )
 
     response = run(
@@ -508,9 +593,21 @@ def test_semantic_and_redis_failures_are_combined(
 
     assert response.result_count == 1
     assert response.degraded is True
-    assert response.degraded_reason is not None
-    assert "Semantic" in response.degraded_reason
-    assert "Redis" in response.degraded_reason
+
+    assert (
+        response.degraded_reason
+        is not None
+    )
+
+    assert (
+        "Semantic"
+        in response.degraded_reason
+    )
+
+    assert (
+        "Redis"
+        in response.degraded_reason
+    )
 
 
 @pytest.mark.parametrize(
@@ -529,19 +626,26 @@ def test_invalid_semantic_ranking_parameters_are_rejected(
     semantic_weight,
     semantic_zero_text_min_score,
 ) -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError
+    ):
         PostSearchService(
-            repository=FakePostRepository([]),
-            semantic_weight=semantic_weight,
+            repository=(
+                FakePostRepository([])
+            ),
+            realtime_feature_loader=(
+                zero_realtime_features
+            ),
+            semantic_weight=(
+                semantic_weight
+            ),
             semantic_zero_text_min_score=(
                 semantic_zero_text_min_score
             ),
         )
 
 
-def test_zero_text_semantic_candidate_below_threshold_is_removed(
-    monkeypatch,
-) -> None:
+def test_zero_text_semantic_candidate_below_threshold_is_removed() -> None:
     semantic_only = make_post(
         post_id=1,
         source_id="semantic-low",
@@ -549,7 +653,11 @@ def test_zero_text_semantic_candidate_below_threshold_is_removed(
         latitude=37.689434,
         longitude=112.761673,
     )
-    semantic_only["content"] = "另一段无关正文"
+
+    semantic_only["content"] = (
+        "另一段无关正文"
+    )
+
     semantic_only["tags"] = []
 
     repository = FakePostRepository(
@@ -557,39 +665,38 @@ def test_zero_text_semantic_candidate_below_threshold_is_removed(
         freshness_rows=[],
     )
 
-    async def fake_semantic(_):
+    async def fake_semantic(
+        _,
+    ):
         return [
             {
-                "source": semantic_only["source"],
-                "source_id": semantic_only["source_id"],
+                "source": (
+                    semantic_only[
+                        "source"
+                    ]
+                ),
+                "source_id": (
+                    semantic_only[
+                        "source_id"
+                    ]
+                ),
                 "semantic_score": 0.49,
                 "semantic_distance": 0.51,
             }
         ]
 
-    async def zero_features(post_ids):
-        return {
-            str(post_id): {
-                "views_1h": 0,
-                "views_24h": 0,
-                "likes_24h": 0,
-                "marks_24h": 0,
-                "unlocks_24h": 0,
-            }
-            for post_id in post_ids
-        }
-
-    monkeypatch.setattr(
-        service_module,
-        "get_post_realtime_features",
-        zero_features,
-    )
-
     service = PostSearchService(
         repository=repository,
-        semantic_recaller=fake_semantic,
+        realtime_feature_loader=(
+            zero_realtime_features
+        ),
+        semantic_recaller=(
+            fake_semantic
+        ),
         semantic_weight=0.2,
-        semantic_zero_text_min_score=0.5,
+        semantic_zero_text_min_score=(
+            0.5
+        ),
     )
 
     response = run(
@@ -602,13 +709,15 @@ def test_zero_text_semantic_candidate_below_threshold_is_removed(
         )
     )
 
-    assert response.total_candidates == 1
+    assert (
+        response.total_candidates
+        == 1
+    )
+
     assert response.result_count == 0
 
 
-def test_semantic_weight_orders_zero_text_candidates(
-    monkeypatch,
-) -> None:
+def test_semantic_weight_orders_zero_text_candidates() -> None:
     high = make_post(
         post_id=1,
         source_id="semantic-high",
@@ -616,6 +725,7 @@ def test_semantic_weight_orders_zero_text_candidates(
         latitude=37.689434,
         longitude=112.761673,
     )
+
     low = make_post(
         post_id=2,
         source_id="semantic-low",
@@ -624,8 +734,14 @@ def test_semantic_weight_orders_zero_text_candidates(
         longitude=112.761673,
     )
 
-    for row in (high, low):
-        row["content"] = "另一段无关正文"
+    for row in (
+        high,
+        low,
+    ):
+        row["content"] = (
+            "另一段无关正文"
+        )
+
         row["tags"] = []
         row["views"] = 0
         row["likes"] = 0
@@ -633,49 +749,51 @@ def test_semantic_weight_orders_zero_text_candidates(
         row["dislikes"] = 0
 
     repository = FakePostRepository(
-        [high, low],
+        [
+            high,
+            low,
+        ],
         freshness_rows=[],
     )
 
-    async def fake_semantic(_):
+    async def fake_semantic(
+        _,
+    ):
         return [
             {
-                "source": low["source"],
-                "source_id": low["source_id"],
+                "source": (
+                    low["source"]
+                ),
+                "source_id": (
+                    low["source_id"]
+                ),
                 "semantic_score": 0.60,
                 "semantic_distance": 0.40,
             },
             {
-                "source": high["source"],
-                "source_id": high["source_id"],
+                "source": (
+                    high["source"]
+                ),
+                "source_id": (
+                    high["source_id"]
+                ),
                 "semantic_score": 0.90,
                 "semantic_distance": 0.10,
             },
         ]
 
-    async def zero_features(post_ids):
-        return {
-            str(post_id): {
-                "views_1h": 0,
-                "views_24h": 0,
-                "likes_24h": 0,
-                "marks_24h": 0,
-                "unlocks_24h": 0,
-            }
-            for post_id in post_ids
-        }
-
-    monkeypatch.setattr(
-        service_module,
-        "get_post_realtime_features",
-        zero_features,
-    )
-
     service = PostSearchService(
         repository=repository,
-        semantic_recaller=fake_semantic,
+        realtime_feature_loader=(
+            zero_realtime_features
+        ),
+        semantic_recaller=(
+            fake_semantic
+        ),
         semantic_weight=0.3,
-        semantic_zero_text_min_score=0.5,
+        semantic_zero_text_min_score=(
+            0.5
+        ),
     )
 
     response = run(
@@ -689,6 +807,7 @@ def test_semantic_weight_orders_zero_text_candidates(
     )
 
     assert response.result_count == 2
+
     assert [
         item.source_id
         for item in response.items
@@ -696,15 +815,14 @@ def test_semantic_weight_orders_zero_text_candidates(
         "semantic-high",
         "semantic-low",
     ]
+
     assert (
         response.items[0].score
         > response.items[1].score
     )
 
 
-def test_unweighted_semantic_only_candidate_is_not_admitted(
-    monkeypatch,
-) -> None:
+def test_unweighted_semantic_only_candidate_is_not_admitted() -> None:
     semantic_only = make_post(
         post_id=1,
         source_id="semantic-only",
@@ -712,7 +830,11 @@ def test_unweighted_semantic_only_candidate_is_not_admitted(
         latitude=37.689434,
         longitude=112.761673,
     )
-    semantic_only["content"] = "另一段完全无关的正文"
+
+    semantic_only["content"] = (
+        "另一段完全无关的正文"
+    )
+
     semantic_only["tags"] = []
 
     repository = FakePostRepository(
@@ -720,39 +842,38 @@ def test_unweighted_semantic_only_candidate_is_not_admitted(
         freshness_rows=[],
     )
 
-    async def fake_semantic(_):
+    async def fake_semantic(
+        _,
+    ):
         return [
             {
-                "source": semantic_only["source"],
-                "source_id": semantic_only["source_id"],
+                "source": (
+                    semantic_only[
+                        "source"
+                    ]
+                ),
+                "source_id": (
+                    semantic_only[
+                        "source_id"
+                    ]
+                ),
                 "semantic_score": 0.95,
                 "semantic_distance": 0.05,
             }
         ]
 
-    async def zero_features(post_ids):
-        return {
-            str(post_id): {
-                "views_1h": 0,
-                "views_24h": 0,
-                "likes_24h": 0,
-                "marks_24h": 0,
-                "unlocks_24h": 0,
-            }
-            for post_id in post_ids
-        }
-
-    monkeypatch.setattr(
-        service_module,
-        "get_post_realtime_features",
-        zero_features,
-    )
-
     service = PostSearchService(
         repository=repository,
-        semantic_recaller=fake_semantic,
+        realtime_feature_loader=(
+            zero_realtime_features
+        ),
+        semantic_recaller=(
+            fake_semantic
+        ),
         semantic_weight=0.0,
-        semantic_zero_text_min_score=0.0,
+        semantic_zero_text_min_score=(
+            0.0
+        ),
     )
 
     response = run(
@@ -765,14 +886,24 @@ def test_unweighted_semantic_only_candidate_is_not_admitted(
         )
     )
 
-    assert response.total_candidates == 1
+    assert (
+        response.total_candidates
+        == 1
+    )
+
     assert response.result_count == 0
 
 
-def test_production_semantic_recall_remains_opt_in() -> None:
+def test_default_post_search_service_has_no_semantic_recaller() -> None:
+    get_post_search_service.cache_clear()
+
+    service = (
+        get_post_search_service()
+    )
+
     assert (
-        service_module
-        .post_search_service
-        ._semantic_recaller
+        service._semantic_recaller
         is None
     )
+
+    get_post_search_service.cache_clear()

@@ -5,12 +5,24 @@ import asyncio
 import httpx
 from fastapi import FastAPI
 
-from app.serving.routers import post_search
-from app.features.post_search.post_search import PostSearchResponse
+from app.features.post_search.post_search import (
+    PostSearchResponse,
+)
+from app.serving.dependencies import (
+    get_post_search_service,
+)
+from app.serving.routers import (
+    post_search,
+)
 
 
-def create_test_app(monkeypatch) -> FastAPI:
-    async def fake_search(request):
+class FakePostSearchService:
+    """Minimal post-search service used by HTTP tests."""
+
+    async def search(
+        self,
+        request,
+    ) -> PostSearchResponse:
         return PostSearchResponse(
             request_id="test-request",
             query=request.query,
@@ -21,14 +33,18 @@ def create_test_app(monkeypatch) -> FastAPI:
             degraded_reason=None,
         )
 
-    monkeypatch.setattr(
-        post_search.post_search_service,
-        "search",
-        fake_search,
+
+def create_test_app() -> FastAPI:
+    app = FastAPI()
+
+    app.dependency_overrides[
+        get_post_search_service
+    ] = lambda: FakePostSearchService()
+
+    app.include_router(
+        post_search.router
     )
 
-    app = FastAPI()
-    app.include_router(post_search.router)
     return app
 
 
@@ -38,7 +54,11 @@ def post_json(
     payload: dict,
 ) -> httpx.Response:
     async def request() -> httpx.Response:
-        transport = httpx.ASGITransport(app=app)
+        transport = (
+            httpx.ASGITransport(
+                app=app
+            )
+        )
 
         async with httpx.AsyncClient(
             transport=transport,
@@ -49,11 +69,13 @@ def post_json(
                 json=payload,
             )
 
-    return asyncio.run(request())
+    return asyncio.run(
+        request()
+    )
 
 
-def test_search_posts_returns_200(monkeypatch) -> None:
-    app = create_test_app(monkeypatch)
+def test_search_posts_returns_200() -> None:
+    app = create_test_app()
 
     response = post_json(
         app,
@@ -65,19 +87,31 @@ def test_search_posts_returns_200(monkeypatch) -> None:
         },
     )
 
-    assert response.status_code == 200
+    assert (
+        response.status_code
+        == 200
+    )
 
     payload = response.json()
 
-    assert payload["query"] == "附近修电脑"
-    assert payload["result_count"] == 0
-    assert payload["degraded"] is False
+    assert (
+        payload["query"]
+        == "附近修电脑"
+    )
+
+    assert (
+        payload["result_count"]
+        == 0
+    )
+
+    assert (
+        payload["degraded"]
+        is False
+    )
 
 
-def test_invalid_search_request_returns_422(
-    monkeypatch,
-) -> None:
-    app = create_test_app(monkeypatch)
+def test_invalid_search_request_returns_422() -> None:
+    app = create_test_app()
 
     response = post_json(
         app,
@@ -88,13 +122,14 @@ def test_invalid_search_request_returns_422(
         },
     )
 
-    assert response.status_code == 422
+    assert (
+        response.status_code
+        == 422
+    )
 
 
-def test_top_k_cannot_exceed_recall_k(
-    monkeypatch,
-) -> None:
-    app = create_test_app(monkeypatch)
+def test_top_k_cannot_exceed_recall_k() -> None:
+    app = create_test_app()
 
     response = post_json(
         app,
@@ -106,4 +141,7 @@ def test_top_k_cannot_exceed_recall_k(
         },
     )
 
-    assert response.status_code == 422
+    assert (
+        response.status_code
+        == 422
+    )
