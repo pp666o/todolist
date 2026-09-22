@@ -1,12 +1,19 @@
 """HTTP API for geo-aware post search."""
 
-from fastapi import APIRouter
+from typing import Annotated
+
+from fastapi import APIRouter, Depends
 
 from app.features.post_search.post_search import (
     PostSearchRequest,
     PostSearchResponse,
 )
-from app.features.post_search.post_search_service import post_search_service
+from app.features.post_search.post_search_service import (
+    PostSearchService,
+)
+from app.serving.dependencies import (
+    get_post_search_service,
+)
 
 
 router = APIRouter(
@@ -22,6 +29,11 @@ router = APIRouter(
 )
 async def search_posts(
     request: PostSearchRequest,
+    service: Annotated[
+        PostSearchService,
+        Depends(get_post_search_service),
+    ],
 ) -> PostSearchResponse:
     """Search posts through the post-search application service."""
-    return await post_search_service.search(request)
+
+    return await service.search(request)

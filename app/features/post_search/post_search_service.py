@@ -582,5 +582,4 @@ class PostSearchService:
             degradation_reasons=degradation_reasons,
         )
 # Semantic recall remains opt-in until BM25 or a stronger
-# reranking stage can safely control semantic-only candidates.
-post_search_service = PostSearchService()
+# reranking stage can safely control semantic-only candidates
