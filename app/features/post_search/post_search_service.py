@@ -111,36 +111,6 @@ def _resolve_bounding_box(request: PostSearchRequest,
     return bounding_box
 
 
-async def _load_realtime_features(
-    self,
-    scored_candidates: list[ScoredSearchCandidate],
-    degradation_reasons: list[str],
-) -> RealtimeFeatureMap:
-    realtime_features: RealtimeFeatureMap = {}
-
-    if not scored_candidates:
-        return realtime_features
-
-    source_ids = [
-        str(candidate["row"]["source_id"])
-        for candidate in scored_candidates
-    ]
-
-    try:
-        realtime_features = (
-            await self._realtime_feature_loader(
-                source_ids
-            )
-        )
-    except Exception as exc:
-        degradation_reasons.append(
-            "Redis realtime features unavailable: "
-            f"{type(exc).__name__}"
-        )
-
-    return realtime_features
-
-
 
 def _attach_realtime_signals(
     scored_candidates: list[ScoredSearchCandidate],
@@ -265,8 +235,6 @@ class PostSearchService:
             ),
         )
 
-        self._repository = repository
-        self._semantic_recaller = semantic_recaller
         self._semantic_weight = float(
             semantic_weight
         )
@@ -276,7 +244,34 @@ class PostSearchService:
         self._repository = repository
         self._realtime_feature_loader = realtime_feature_loader
         self._semantic_recaller = semantic_recaller
-
+    async def _load_realtime_features(
+            self,
+            scored_candidates: list[ScoredSearchCandidate],
+            degradation_reasons: list[str],
+        ) -> RealtimeFeatureMap:
+            realtime_features: RealtimeFeatureMap = {}
+    
+            if not scored_candidates:
+                return realtime_features
+    
+            source_ids = [
+                str(candidate["row"]["source_id"])
+                for candidate in scored_candidates
+            ]
+    
+            try:
+                realtime_features = (
+                    await self._realtime_feature_loader(
+                        source_ids
+                    )
+                )
+            except Exception as exc:
+                degradation_reasons.append(
+                    "Redis realtime features unavailable: "
+                    f"{type(exc).__name__}"
+                )
+    
+            return realtime_features 
     async def _recall_candidates(
         self,
         *,
@@ -392,7 +387,8 @@ class PostSearchService:
                 freshness_only,
                 freshness_candidates,
             )  
-         
+       
+     
     async def search(
         self,
         request: PostSearchRequest,
